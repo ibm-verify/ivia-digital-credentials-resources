@@ -58,6 +58,13 @@ Options:
 
 Notes:
   - If required parameters are not provided, you will be prompted to enter them interactively
+  - During deployment, you will be prompted for four secrets:
+    * Postgres password (for database authentication)
+    * Deployment Admin secret (client_id: admin)
+    * Tenant0 Admin secret (client_id: 00000000-0000-4000-8000-000000000000)
+    * Tenant1 Admin secret (client_id: 11111111-1111-4111-8111-111111111111)
+  - You will also be prompted to select which tenant (0 or 1) to use for initialization
+  - Admin secrets must NOT be 'secret' for security reasons
 
 Examples:
   $0 build --registry icr.io --registry-namespace myorg/myrepo my-project  # Build web app images
@@ -384,13 +391,56 @@ prompt_for_missing_values() {
             echo
         fi
         
-        if [[ -z "$admin_password" ]]; then
-            read -s -p "Enter admin password for DC initialization (DO NOT USE '${illegal_admin_password}'): " admin_password
+        # Prompt for Postgres password
+        if [[ -z "$postgres_password" ]]; then
+            read -s -p "Enter Postgres password: " postgres_password
+            echo
+        fi
+        
+        # Prompt for admin secrets
+        if [[ -z "$deployment_admin_secret" ]]; then
+            read -s -p "Enter secret for Deployment Admin (DO NOT USE '${illegal_admin_password}'): " deployment_admin_secret
             echo
         fi
 
-        if [ "$admin_password" == "$illegal_admin_password" ]; then
-            echo "Invalid admin password. Please do not use '${illegal_admin_password}'."
+        if [ "$deployment_admin_secret" == "$illegal_admin_password" ]; then
+            echo "Invalid deployment admin secret. Please do not use '${illegal_admin_password}'."
+            exit 1
+        fi
+        
+        if [[ -z "$tenant0_admin_secret" ]]; then
+            read -s -p "Enter secret for Tenant0 Admin (DO NOT USE '${illegal_admin_password}'): " tenant0_admin_secret
+            echo
+        fi
+
+        if [ "$tenant0_admin_secret" == "$illegal_admin_password" ]; then
+            echo "Invalid tenant0 admin secret. Please do not use '${illegal_admin_password}'."
+            exit 1
+        fi
+        
+        if [[ -z "$tenant1_admin_secret" ]]; then
+            read -s -p "Enter secret for Tenant1 Admin (DO NOT USE '${illegal_admin_password}'): " tenant1_admin_secret
+            echo
+        fi
+
+        if [ "$tenant1_admin_secret" == "$illegal_admin_password" ]; then
+            echo "Invalid tenant1 admin secret. Please do not use '${illegal_admin_password}'."
+            exit 1
+        fi
+        
+        # Prompt for which tenant to use
+        if [[ -z "$tenant" ]]; then
+            read -p "Enter tenant to use for initialization (0 or 1, default 0): " tenant
+        fi
+        
+        # Default to tenant 0 if not specified
+        if [[ -z "$tenant" ]]; then
+            tenant="0"
+        fi
+        
+        # Validate tenant value
+        if [[ "$tenant" != "0" && "$tenant" != "1" ]]; then
+            echo "Invalid tenant value. Must be 0 or 1."
             exit 1
         fi
         
@@ -418,12 +468,26 @@ build()
     # Build the bank-app image
     echo "Building bank-app$suffix image..."
     docker build --platform linux/amd64 -t $registry_url/$registry_namespace/bank-app$suffix:latest -f ./bank-app/Dockerfile .
+    bank_build_status=$?
+    if [ $bank_build_status -ne 0 ]; then
+        echo "❌ Error: Failed to build bank-app image. Build exited with status $bank_build_status."
+        echo "Please check the build output above for errors."
+        exit 1
+    fi
+    echo "✅ bank-app image built successfully."
     
     # Build the dmv-app image
     echo "Building dmv-app$suffix image..."
     docker build --platform linux/amd64 -t $registry_url/$registry_namespace/dmv-app$suffix:latest -f ./dmv-app/Dockerfile .
+    dmv_build_status=$?
+    if [ $dmv_build_status -ne 0 ]; then
+        echo "❌ Error: Failed to build dmv-app image. Build exited with status $dmv_build_status."
+        echo "Please check the build output above for errors."
+        exit 1
+    fi
+    echo "✅ dmv-app image built successfully."
     
-    echo "Docker images built successfully."
+    echo "✅ All Docker images built successfully."
 }
 
 ###############################################################################
@@ -544,7 +608,18 @@ deploy_web_apps()
 
     # Run init.py to create the .env file with all required variables
     echo "Running init.py to initialize the environment..."
-    DMV_HOST=https://$DMV_HOST \
+
+    # Set ADMIN_NAME and ADMIN_PASSWORD based on selected tenant
+    if [[ "$tenant" == "0" ]]; then
+        admin_name="00000000-0000-4000-8000-000000000000"
+        admin_password="$tenant0_admin_secret"
+    else
+        admin_name="11111111-1111-4111-8111-111111111111"
+        admin_password="$tenant1_admin_secret"
+    fi
+
+    # Capture init.py output and check for errors
+    init_output=$(DMV_HOST=https://$DMV_HOST \
     BANK_HOST=https://$BANK_HOST \
     AGENCY_URL=$agency_url \
     VICAL_BASE_URL=$agency_url \
@@ -552,8 +627,35 @@ deploy_web_apps()
     IDP_URL=$idp_url \
     IDP_CLIENT_ID=$idp_client_id \
     IDP_CLIENT_SECRET=$idp_client_secret \
+    ADMIN_NAME=$admin_name \
     ADMIN_PASSWORD=$admin_password \
-    python3 init.py
+    python3 init.py 2>&1)
+    init_exit_code=$?
+
+    # Display the output
+    echo "$init_output"
+
+    # Check for specific error patterns
+    if echo "$init_output" | grep -q "Error getting agents:"; then
+        echo "Deployment aborted: Failed to get agents from the agency."
+        exit 1
+    fi
+
+    if echo "$init_output" | grep -q "Error> failed to create DMV agent"; then
+        echo "Deployment aborted: Failed to create DMV agent."
+        exit 1
+    fi
+
+    if echo "$init_output" | grep -q "Error> failed to create Bank agent"; then
+        echo "Deployment aborted: Failed to create Bank agent."
+        exit 1
+    fi
+
+    # Check exit code
+    if [ $init_exit_code -ne 0 ]; then
+        echo "Deployment aborted: init.py failed with exit code $init_exit_code"
+        exit 1
+    fi
 
     # Check if .env file was created successfully
     check_env_file
@@ -766,8 +868,32 @@ deploy_dc_agency()
                 "endpoint: \"/locallogin\"" "endpoint: \"/oauth2/auth\""
     replace_string $temp/provider.yml \
                 "endpoint: \"/locallogout\"" "endpoint: \"/oauth2/logout\""
+    # Replace hard-coded Postgres password in provider.yml
     replace_string $temp/provider.yml \
-                "client_secret: secret" "client_secret: $admin_password"
+                "password: passw0rd" "password: $postgres_password"
+    # Update the three admin client secrets in provider.yml
+    # Use awk to update each admin client secret individually
+    awk -v deployment_secret="$deployment_admin_secret" -v tenant0_secret="$tenant0_admin_secret" -v tenant1_secret="$tenant1_admin_secret" '
+    /client_id: admin$/ { in_deployment_admin=1 }
+    /client_id: 00000000-0000-4000-8000-000000000000$/ { in_tenant0_admin=1 }
+    /client_id: 11111111-1111-4111-8111-111111111111$/ { in_tenant1_admin=1 }
+    /client_secret:/ {
+        if (in_deployment_admin) {
+            print "    client_secret: " deployment_secret
+            in_deployment_admin=0
+            next
+        } else if (in_tenant0_admin) {
+            print "    client_secret: " tenant0_secret
+            in_tenant0_admin=0
+            next
+        } else if (in_tenant1_admin) {
+            print "    client_secret: " tenant1_secret
+            in_tenant1_admin=0
+            next
+        }
+    }
+    { print }
+    ' $temp/provider.yml > $temp/provider.yml.tmp && mv $temp/provider.yml.tmp $temp/provider.yml
     kubectl create configmap $op_configmap --from-file=$temp/
     rm -rf $temp/*
     
@@ -777,8 +903,10 @@ deploy_dc_agency()
     replace_string $temp/config.yaml "      - https://iviadcgw:8443/*" "      - https://$host:8443/*"
     replace_string $temp/config.yaml "url: \"https://iviadcgw:8443\"" "url: \"https://$host\""
     replace_string $temp/config.yaml "            endpoint: \"https://iviadcgw:8443/oauth2\"" "            endpoint: \"https://$host/oauth2\""
-    replace_string $temp/config.yaml "        client_secret: \"secret\"" "        client_secret: \"$admin_password\""
-    replace_string $temp/config.yaml "              client_secret: \"secret\"" "              client_secret: \"$admin_password\""
+    replace_string $temp/config.yaml "        client_secret: \"secret\"" "        client_secret: \"$deployment_admin_secret\""
+    replace_string $temp/config.yaml "              client_secret: \"secret\"" "              client_secret: \"$deployment_admin_secret\""
+    # Replace hard-coded Postgres password in config.yaml
+    replace_string $temp/config.yaml "    password: \"passw0rd\"" "    password: \"$postgres_password\""
     kubectl create configmap $vc_configmap --from-file=$temp/
     rm -rf $temp/*
 
@@ -802,6 +930,12 @@ deploy_dc_agency()
     echo "Deploying the pods...."
     cp -r ./dc-agency/openshift/* $temp/
     rm -f $temp/routes.yaml
+    
+    # Replace hard-coded Postgres password in YAML files
+    echo "Updating Postgres password in deployment files..."
+    replace_string $temp/iviadcdb.yaml \
+                "value: passw0rd" "value: $postgres_password"
+    
     kubectl apply -f $temp
     rm -rf $temp
 
@@ -941,7 +1075,10 @@ registry_url=""
 registry_namespace=""
 docker_username=""
 docker_password=""
-admin_password=""
+deployment_admin_secret=""
+tenant0_admin_secret=""
+tenant1_admin_secret=""
+tenant="0"
 
 illegal_admin_password="secret"
 
@@ -964,8 +1101,8 @@ while [[ $# -gt 0 ]]; do
             dc_agency_only=true
             shift
             ;;
-        --admin_password)
-            admin_password="$2"
+        --tenant)
+            tenant="$2"
             shift 2
             ;;
         --idp-url)

@@ -118,6 +118,44 @@ dynamic_registration:
       - cdr:registration
 
 clients:
+  - client_id: 00000000-0000-4000-8000-000000000000
+    client_name: Administrator for tenant0
+    client_secret: secret
+    enabled: true
+    grant_types:
+      - client_credentials
+    scopes:
+      - "admin"
+    extension:
+      tenantUUID: "00000000-0000-4000-8000-000000000000"
+  - client_id: 00000000-0000-4000-8000-000000000000_vcholders
+    client_name: VC Holder
+    enabled: true
+    grant_types:
+      - password
+      - refresh_token
+    extension:
+      tenantUUID: "00000000-0000-4000-8000-000000000000"
+      isHolder: "true"
+  - client_id: 11111111-1111-4111-8111-111111111111
+    client_name: Administrator for tenant1
+    client_secret: secret
+    enabled: true
+    grant_types:
+      - client_credentials
+    scopes:
+      - "admin"
+    extension:
+      tenantUUID: "11111111-1111-4111-8111-111111111111"
+  - client_id: 11111111-1111-4111-8111-111111111111_vcholders
+    client_name: VC Holder for tenant1
+    enabled: true
+    grant_types:
+      - password
+      - refresh_token
+    extension:
+      tenantUUID: "11111111-1111-4111-8111-111111111111"
+      isHolder: "true"
   - client_id: onpremise_vcholders
     client_name: VC Holder
     enabled: true
@@ -135,7 +173,7 @@ clients:
     redirect_uris:
       - http://localhost:8090/logincallback
   - client_id: admin
-    client_name: DC Admin
+    client_name: Administrator for the deployment
     client_secret: secret
     enabled: true
     grant_types:

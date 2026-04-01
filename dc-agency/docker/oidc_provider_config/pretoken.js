@@ -4,13 +4,14 @@ importClass(Packages.com.tivoli.am.fim.trustserver.sts.utilities.IDMappingExtUti
  * particular concern are administrative users.
  */
 
-const grantType = stsuu.getContextAttributes().getAttributeValueByName(
+var grantType = stsuu.getContextAttributes().getAttributeValueByName(
                                                     "grant_type");
-const clientID  = stsuu.getContextAttributes().getAttributeValueByName(
+var clientID  = stsuu.getContextAttributes().getAttributeValueByName(
                                                     "client_id");
 
 IDMappingExtUtils.traceString("Starting PRE TOKEN JS");
 // IDMappingExtUtils.traceString("CONTEXT ATTRIBUTES\n: " + stsuu.toString());
+// IDMappingExtUtils.traceString("client attributes: " + JSON.stringify(oauth_client));
 IDMappingExtUtils.traceString("clientID: " + clientID);
 IDMappingExtUtils.traceString("grantType: " + grantType);
 
@@ -23,7 +24,7 @@ IDMappingExtUtils.traceString("grantType: " + grantType);
  */
 
 if (grantType === "urn:ietf:params:oauth:grant-type:pre-authorized_code") {
-    const preAuthorizedCode  = stsuu.getContextAttributes().getAttributeValueByName("pre-authorized_code");
+    var preAuthorizedCode  = stsuu.getContextAttributes().getAttributeValueByName("pre-authorized_code");
     IDMappingExtUtils.traceString("pre-authorized_code: " + preAuthorizedCode);
     tokenData["pre-authorized_code"] = preAuthorizedCode;
 }
@@ -32,15 +33,14 @@ const excludeAznClientCheck = new Set(["default_oid4vci_wallet"]);
 
 if (!excludeAznClientCheck.has(clientID)) {
 
-    const adminIDs = new Set(["admin"]);
+    // Let the token have all of the permitted scopes of the registered client.
+    tokenData.scope = (oauth_client._client.scopes || []).join(' ');
 
-    if (grantType == "client_credentials" && adminIDs.has(clientID)) {
-        tokenData.scope = "admin";
-    } else if (grantType == "password") {
-        tokenData.scope = "holder";
-    } else {
-        tokenData.scope = "verifier/issuers";
-    }
+    // Add tenantUUID from extension properties to the token
+    tokenData.tenantUUID = oauth_client.getExtendedData("tenantUUID");
+    IDMappingExtUtils.traceString("Added tenantUUID to token: " + tokenData.tenantUUID);
+
+    tokenData.isHolder = (oauth_client.getExtendedData("isHolder") === "true");
 
     /*
     * If the grant type is an authorization code (which occurs during OIDC

@@ -413,10 +413,13 @@ deploy_web_apps() {
         # Build images first and check for failures
         echo "Building web app images..."
         docker-compose -f docker-compose-webapps.yml build
-        if [ $? -ne 0 ]; then
-            echo "Error: Failed to build web app images. Aborting deployment."
+        build_status=$?
+        if [ $build_status -ne 0 ]; then
+            echo "❌ Error: Failed to build web app images. Build exited with status $build_status."
+            echo "Please check the build output above for errors."
             exit 1
         fi
+        echo "✅ Web app images built successfully."
         
         # Start the services after successful build
         docker-compose -f docker-compose-webapps.yml $action -d

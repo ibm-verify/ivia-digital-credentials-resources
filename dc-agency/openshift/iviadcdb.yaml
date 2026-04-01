@@ -30,7 +30,7 @@ spec:
     - name: iviadcdb
 
       # The fully qualified name of the verify-access image.
-      image: icr.io/ivia/ivia-postgresql:11.0.1.0
+      image: icr.io/ivia/ivia-postgresql:11.0.2.0
 
       # The port on which the container will be listening.
       ports:

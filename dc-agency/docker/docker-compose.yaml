@@ -23,7 +23,7 @@ services:
       - iviadcdb
   iviadcgw:
     container_name: iviadcgw
-    image: icr.io/ibmappgateway/ibm-application-gateway:25.12
+    image: icr.io/ibmappgateway/ibm-application-gateway:26.03
     ports:
       - "8443:8443"
     volumes:
@@ -34,7 +34,7 @@ services:
       - iviadcop
   iviadc:
     container_name: iviadc
-    image: icr.io/ivia/ivia-digital-credentials:25.12
+    image: icr.io/ivia/ivia-digital-credentials:26.03
     ports:
       - "9720:9720"
     volumes:

@@ -25,7 +25,7 @@ spec:
     - name: iviadcgw
 
       # The fully qualified name of the image.
-      image: icr.io/ibmappgateway/ibm-application-gateway:25.06
+      image: icr.io/ibmappgateway/ibm-application-gateway:26.03
 
       # The port on which the container will be listening.
       ports:

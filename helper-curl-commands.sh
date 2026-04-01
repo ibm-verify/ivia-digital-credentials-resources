@@ -50,7 +50,7 @@ else
 fi
 
 if [ -z "$ADMIN_NAME" ] ; then
-    ADMIN_NAME=admin
+    ADMIN_NAME=00000000-0000-4000-8000-000000000000
 fi
 
 if [ -z "$ADMIN_PASSWORD" ] ; then

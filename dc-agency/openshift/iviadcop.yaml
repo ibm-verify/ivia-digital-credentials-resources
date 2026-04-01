@@ -25,7 +25,7 @@ spec:
     - name: iviadcop
 
       # The fully qualified name of the image.
-      image: icr.io/ivia/ivia-oidc-provider:25.06
+      image: icr.io/ivia/ivia-oidc-provider:25.10
 
       # The port on which the container will be listening.
       ports:
@@ -36,15 +36,6 @@ spec:
           memory: "512Mi"
         requests:
           memory: "256Mi"
-
-      # Environment definition.
-      env:
-        - name: POSTGRES_USER
-          value: iviadc
-        - name: POSTGRES_PASSWORD
-          value: passw0rd
-        - name: POSTGRES_SSL_KEYDB
-          value: /var/postgres/config/iviadcdb_priv_pub.pem
 
       volumeMounts:
         - name: config-volume
