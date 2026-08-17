@@ -42,7 +42,7 @@ logging:
 authentication:
   endpoint: "/locallogin"
   callback_param_name: ""
-  subject_attribute_name: ""
+  subject_attribute_name: "uid"
   credentials_jwt:
     signature_validation_enforcement: false
   ssl:
@@ -95,6 +95,9 @@ server_connections:
 
 rules:
   mapping:
+    - name: ropc
+      rule_type: javascript
+      content: "@ropc.js"
     - name: pretoken
       rule_type: javascript
       content: "@pretoken.js"
@@ -172,6 +175,8 @@ clients:
       - code
     redirect_uris:
       - http://localhost:8090/logincallback
+      - http://localhost:8091/logincallback
+      - http://localhost:8092/logincallback
   - client_id: admin
     client_name: Administrator for the deployment
     client_secret: secret

@@ -106,13 +106,13 @@ const OfferImageDialog: React.FC<OfferImageDialogProps> = ({ isOpen, handleClose
   }, [offerId, isLoading, isOpen]);
 
   const pollOfferState = async () => {
-    if (!shouldPollRef.current || !isMountedRef.current || !offerId) {
+    if (!shouldPollRef.current || !isMountedRef.current) {
       return;
     }
 
     try {
-      // Check the offer state
-      const response = await vciCredentialService.checkOfferState(offerId);
+      // The server resolves the offer ID from the session — no ID passed here.
+      const response = await vciCredentialService.checkOfferState();
       
       // Handle different states
       if (response.state === 'Completed') {

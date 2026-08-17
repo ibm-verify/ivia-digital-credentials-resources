@@ -42,6 +42,20 @@ if (!excludeAznClientCheck.has(clientID)) {
 
     tokenData.isHolder = (oauth_client.getExtendedData("isHolder") === "true");
 
+    if (grantType === "password" && tokenData.isHolder) {
+        var holderSubject = stsuu.getContextAttributes().getAttributeValueByName("uid")
+            || stsuu.getContextAttributes().getAttributeValueByName("username")
+            || stsuu.getPrincipalName();
+
+        if (holderSubject) {
+            tokenData.sub = holderSubject;
+            tokenData.uid = holderSubject;
+            tokenData.username = holderSubject;
+            tokenData.preferred_username = holderSubject;
+            IDMappingExtUtils.traceString("Mapped holder subject to token sub: " + tokenData.sub);
+        }
+    }
+
     /*
     * If the grant type is an authorization code (which occurs during OIDC
     * authentication) we want to add the scope to the id token data, based

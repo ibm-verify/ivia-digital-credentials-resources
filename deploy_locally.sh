@@ -5,38 +5,70 @@
 # using Docker Compose.
 #
 
+# Load shared helper functions
+# shellcheck source=common_functions.sh
+source "$(dirname "$0")/common_functions.sh"
+
 ###############################################################################
 # Constants.
 
-instructions="This script is used to deploy the OID4VC sample apps (bank-app and dmv-app)
+instructions="This script is used to deploy the OID4VC sample apps (bank-app, dmv-app and hr-portal)
 and dc-agency services locally using Docker Compose.
 
 Usage:
-  $0 [all|web-apps|dc-agency] [up|down] [options]
+  $0 [command] [options]
+
+Commands:
+  deploy               Deploy services (default)
+  undeploy             Undeploy services
 
 Options:
-  all                Deploy both dc-agency services and web-apps (default)
-  web-apps           Deploy only the web-apps (bank-app and dmv-app)
-  dc-agency          Deploy only the dc-agency services
-  up                 Start the services (default)
-  down               Stop the services
-  --idp-client-id VALUE    Specify the IDP client ID
-  --idp-client-secret VALUE Specify the IDP client secret
-  --idp-url VALUE          Specify the IDP URL
+  --web-apps-only      Deploy/undeploy only the web apps
+  --dc-agency-only     Deploy/undeploy only the dc-agency services
+  --debug              Print full IBM Verify app provisioning request/response payloads
+
+  IBM Verify bootstrap credentials (mandatory for web-app 'deploy'):
+  --dmv-verify-base-url VALUE               DMV IBM Verify tenant base URL
+                                            (default: https://demos.verify.ibm.com)
+  --dmv-verify-bootstrap-client-id VALUE    DMV bootstrap API client ID (mandatory)
+  --dmv-verify-bootstrap-client-secret VALUE DMV bootstrap API client secret (mandatory)
+
+  --hr-verify-base-url VALUE                HR IBM Verify tenant base URL
+                                            (currently always inherited from DMV — IAG limitation)
+  --hr-verify-bootstrap-client-id VALUE     HR bootstrap API client ID
+                                            (currently always inherited from DMV — IAG limitation)
+  --hr-verify-bootstrap-client-secret VALUE HR bootstrap API client secret
+                                            (currently always inherited from DMV — IAG limitation)
+
+  --bank-verify-base-url VALUE              Bank IBM Verify tenant base URL (mandatory)
+  --bank-verify-bootstrap-client-id VALUE   Bank bootstrap API client ID (mandatory)
+  --bank-verify-bootstrap-client-secret VALUE Bank bootstrap API client secret (mandatory)
 
 Notes:
-  - The IDP options are required for all 'up' actions
-  - If not provided, you will be prompted to enter them interactively
+  - Web-app images must be built before deploying. Run './build.sh' first.
+  - If not provided, IBM Verify credentials will be prompted interactively
+  - Bootstrap credentials are used once to provision OIDC apps, API clients, and FIDO2 RPs
+    in each IBM Verify tenant; provisioned credentials are written into each app's .env file
+  - HR bootstrap credentials always inherit DMV's values (IAG limitation — see common_functions.sh)
+  - ⚠️  Bank: users and groups will be created in the bank IBM Verify tenant during deployment
+  - Each app's .env file is created separately: .env.bank, .env.dmv, .env.hr
+  - On 'undeploy', the provisioned IBM Verify objects (apps, FIDO2 RPs, bank group) are deleted
 
 Examples:
-  $0                  # Deploy both dc-agency and web-apps
-  $0 all up           # Same as above
-  $0 web-apps         # Deploy only web-apps 
-  $0 dc-agency        # Deploy only dc-agency services 
-  $0 all down         # Stop all services
-  $0 web-apps down    # Stop only web-apps
-  $0 dc-agency down   # Stop only dc-agency services
-  $0 all up --idp-client-id abc --idp-client-secret xyz --idp-url https://example.com
+  $0                   # Deploy both dc-agency and web-apps
+  $0 deploy            # Same as above
+  $0 deploy --web-apps-only     # Deploy only web-apps
+  $0 deploy --dc-agency-only    # Deploy only dc-agency services
+  $0 undeploy                   # Stop all services (also tears down IBM Verify objects)
+  $0 undeploy --web-apps-only   # Stop only web-apps (also tears down IBM Verify objects)
+  $0 undeploy --dc-agency-only  # Stop only dc-agency
+  $0 deploy \\
+      --dmv-verify-base-url https://demos.verify.ibm.com \\
+      --dmv-verify-bootstrap-client-id abc \\
+      --dmv-verify-bootstrap-client-secret xyz \\
+      --bank-verify-base-url https://bank.verify.ibm.com \\
+      --bank-verify-bootstrap-client-id bk123 \\
+      --bank-verify-bootstrap-client-secret bksecret
 "
 
 ###############################################################################
@@ -49,7 +81,41 @@ usage()
 }
 
 ###############################################################################
+# Save / load deployment state (structural flags only — no credentials).
+
+state_file()
+{
+    echo ".deploy-state.local"
+}
+
+save_state()
+{
+    local file
+    file=$(state_file)
+    cat > "$file" <<EOF
+# Local deployment state — do not edit manually.
+# Re-generated on each successful deploy.
+EOF
+    chmod 600 "$file"
+    echo "Deployment state saved to $file"
+}
+
+load_state()
+{
+    local file
+    file=$(state_file)
+    if [ ! -f "$file" ]; then
+        return 0  # No state file yet — not an error for local deployments
+    fi
+    # shellcheck source=/dev/null
+    source "$file"
+}
+
+###############################################################################
 # Helper functions.
+# Note: replace_string(), switch_iag_to_oidc(), prompt_for_verify_credentials(),
+#       prompt_for_undeploy_verify_credentials(), teardown_verify_objects(), and
+#       check_env_files_exist() are defined in common_functions.sh.
 
 # Function to check if a container is running
 is_container_running() {
@@ -67,127 +133,62 @@ wait_for_container() {
     local container_name=$1
     local max_attempts=30
     local attempt=1
-    
+
     echo "Waiting for $container_name to be ready..."
-    
+
     while ! is_container_running "$container_name"; do
         if [[ $attempt -ge $max_attempts ]]; then
             echo "Error: $container_name did not start within the expected time."
             return 1
         fi
-        
+
         echo "Waiting for $container_name to start... (attempt $attempt/$max_attempts)"
         sleep 2
         ((attempt++))
     done
-    
+
     echo "$container_name is running."
     return 0
 }
 
-# Function to check if DC agency services are fully functional using Docker health check
+# Function to check if DC agency services are fully functional using Docker health checks
 check_dc_agency_services() {
     local max_attempts=$1
-    
+
     if [ -z "$max_attempts" ]; then
-        max_attempts=20  # Default to 20 attempts (5 minutes with 15-second intervals)
+        max_attempts=60  # Default to 60 attempts (5 minutes with 5-second intervals)
     fi
-    
+
     local attempt=1
-    
+
     echo "Checking if DC agency services are fully up and functional..."
     echo "Waiting for iviadc health check to pass..."
-    
+    # Note: iviadcop does not define a Docker HEALTHCHECK — we rely solely on iviadc.
+    # iviadc is healthy only after it has successfully connected to both the database
+    # (iviadcdb) and the OIDC provider (iviadcop), so its health implicitly covers
+    # the readiness of the full dc-agency stack.
+
     while [ $attempt -le $max_attempts ]; do
-        echo "Attempt $attempt/$max_attempts: Checking iviadc health status"
-        
-        # Get the health status of the iviadc container
-        local health_status=$(docker inspect --format='{{.State.Health.Status}}' iviadc 2>/dev/null)
-        
-        if [ "$health_status" = "healthy" ]; then
+        echo "Attempt $attempt/$max_attempts: Checking DC agency health status"
+
+        local iviadc_status=$(docker inspect --format='{{.State.Health.Status}}' iviadc 2>/dev/null)
+
+        if [ "$iviadc_status" = "healthy" ]; then
             echo "✅ iviadc is healthy! DC agency services are fully up and functional."
             return 0
         else
-            echo "❌ iviadc health status: $health_status (waiting for 'healthy')"
-            echo "Waiting for 15 seconds before next check..."
-            sleep 15
+            echo "❌ iviadc: $iviadc_status (waiting for 'healthy')"
+            echo "Waiting for 5 seconds before next check..."
+            sleep 5
             ((attempt++))
         fi
     done
-    
+
     echo "❌ DC agency services did not become fully healthy after $max_attempts attempts."
     return 1
 }
 
-# Function to replace string in a file
-replace_string() {
-    local file=$1
-    local from=$2
-    local to=$3
-
-    sed "s|$from|$to|g" "$file" > "$file.tmp"
-    mv "$file.tmp" "$file"
-}
-
-# Function to parse named options
-parse_named_options() {
-    while [[ $# -gt 0 ]]; do
-        case "$1" in
-            --idp-client-id)
-                idp_client_id="$2"
-                shift 2
-                ;;
-            --idp-client-secret)
-                idp_client_secret="$2"
-                shift 2
-                ;;
-            --idp-url)
-                idp_url="$2"
-                shift 2
-                ;;
-            *)
-                # Unknown option, skip it
-                shift
-                ;;
-        esac
-    done
-}
-
-# Function to prompt for missing values
-prompt_for_missing_values() {
-    if [[ "$action" == "up" ]]; then
-        if [[ -z "$idp_client_id" ]]; then
-            read -p "Enter IDP client ID (hit enter for default): " idp_client_id
-        fi
-        
-        if [[ -z "$idp_client_secret" ]]; then
-            read -p "Enter IDP client secret (hit enter for default): " idp_client_secret
-        fi
-        
-        if [[ -z "$idp_url" ]]; then
-            read -p "Enter IDP URL (hit enter for default): " idp_url
-        fi
-
-        # set defaults if needed
-        if [[ -z "$idp_client_id" ]]; then
-            idp_client_id="$default_idp_client_id"
-        fi
-        
-        if [[ -z "$idp_client_secret" ]]; then
-            idp_client_secret="$default_idp_client_secret"
-        fi
-        
-        if [[ -z "$idp_url" ]]; then
-            idp_url="$default_idp_url"
-        fi
-
-    fi
-}
-
 # Ensure the user has performed the required pre-req (step 2) for dcagency config.yaml
-# cp config/config.template config/config.yaml
-# sed -i.bak 's#LICENSE_PLACEHOLDER#<insert-license-key-string-here>#' config/config.yaml
-# rm -f config/config.yaml.bak
 check_dc_agency_config() {
     echo "Checking dc-agency config.yaml..."
     if [ ! -f dc-agency/docker/config/config.yaml ]; then
@@ -200,54 +201,27 @@ check_dc_agency_config() {
         echo "Error: dc-agency config.yaml still contains LICENSE_PLACEHOLDER. Please replace it with your actual license key."
         exit 1
     fi
-    
 }
 
-switch_iag_to_oidc()
-{
-    local config_file="./dc-agency/docker/iag_config/config.yaml"
-    if [ -f "$1" ]; then
-        config_file="$1"
+# Function to prompt for missing values
+prompt_for_missing_values() {
+    if [[ "$command" == "deploy" ]]; then
+        # IBM Verify bootstrap credentials (shared logic in common_functions.sh)
+        prompt_for_verify_credentials
+    elif [[ "$command" == "undeploy" && "$dc_agency_only" != true ]]; then
+        # Verify credentials are needed on undeploy to tear down provisioned objects
+        prompt_for_undeploy_verify_credentials
     fi
-    
-    if [ ! -f "$config_file" ]; then
-        echo "Error: IAG config file not found at $config_file"
-        return 1
-    fi
-    
-    echo "Switching IAG authentication from EAI to OIDC..."
-    
-    # Create a backup
-    cp "$config_file" "$config_file.bak"
-    
-    # Use awk to toggle between eai and oidc sections
-    awk '
-    /^  eai:/ { in_eai=1; print "#" $0; next }
-    /^    triggers:/ && in_eai { print "#" $0; next }
-    /^    - \/locallogin\*/ && in_eai { print "#" $0; in_eai=0; next }
-    /^#  oidc:/ { in_oidc=1; sub(/^#  /, "  "); print; next }
-    /^#    discovery_endpoint:/ && in_oidc { sub(/^#    /, "    "); print; next }
-    /^#    client_id:/ && in_oidc { sub(/^#    /, "    "); print; next }
-    /^#    client_secret:/ && in_oidc { sub(/^#    /, "    "); print; next }
-    /^#    pkce:/ && in_oidc { sub(/^#    /, "    "); print; in_oidc=0; next }
-    { print }
-    ' "$config_file" > "$config_file.tmp"
-    
-    # Replace original file with modified version
-    mv "$config_file.tmp" "$config_file"
-    
-    echo "IAG config updated: EAI commented out, OIDC enabled"
-    return 0
 }
 
 # Function to deploy dc-agency services
 deploy_dc_agency() {
-    
+
     check_dc_agency_config
 
     local action=$1
     echo "Deploying dc-agency services ($action)..."
-    
+
     if [[ "$action" == "up" ]]; then
         # Run setup.sh to generate certificates before starting services
         echo "Running setup.sh to generate certificates..."
@@ -258,38 +232,42 @@ deploy_dc_agency() {
             popd > /dev/null
             exit 1
         fi
-        
-        # Temporarily modify IAG config with client credentials
-        echo "Temporarily updating IAG config with client credentials..."
-        # Create a backup of the original config
-        cp iag_config/config.yaml iag_config/config.yaml.bak
-        
-        # Update idp_client_id, idp_client_secret, and discovery_endpoint in the config
-        if [[ -n "$idp_client_id" ]]; then
-            replace_string "iag_config/config.yaml" \
-                        "client_id: \"client_id\"" "client_id: \"$idp_client_id\""
-        fi
 
-        if [[ -n "$idp_client_secret" ]]; then
-            replace_string "iag_config/config.yaml" \
-                        "client_secret: \"client_secret\"" "client_secret: \"$idp_client_secret\""
-        fi
+        # NOTE: IAG external IDP wiring is currently unused.
+        # The IAG runs in local EAI mode (hardcoded user_1) for all deployments.
+        # The web apps authenticate directly against IBM Verify SaaS via their own
+        # provisioned OIDC apps — the IAG login flow is not in their path at all.
+        # To re-enable external IDP login for the dc-agency admin UI, restore the
+        # block below and re-introduce the --dmv-idp-url / --dmv-idp-client-id /
+        # --dmv-idp-client-secret parameters.
+        #
+        # # Temporarily modify IAG config with client credentials
+        # echo "Temporarily updating IAG config with client credentials..."
+        # cp iag_config/config.yaml iag_config/config.yaml.bak
+        # cp oidc_provider_config/provider.yml oidc_provider_config/provider.yml.bak
+        #
+        # if [[ -n "$idp_client_id" ]]; then
+        #     replace_string "iag_config/config.yaml" \
+        #                 "client_id: \"client_id\"" "client_id: \"$idp_client_id\""
+        # fi
+        # if [[ -n "$idp_client_secret" ]]; then
+        #     replace_string "iag_config/config.yaml" \
+        #                 "client_secret: \"client_secret\"" "client_secret: \"$idp_client_secret\""
+        # fi
+        # if [[ "$idp_url" != "$default_idp_url" ]]; then
+        #     echo "Custom IDP URL provided, updating to use oidc in IAG config..."
+        #     switch_iag_to_oidc "iag_config/config.yaml"
+        #     replace_string "iag_config/config.yaml" \
+        #                 "discovery_endpoint: \"https://example.idp/oauth2/.well-known/openid-configuration\"" \
+        #                 "discovery_endpoint: \"$idp_url/oauth2/.well-known/openid-configuration\""
+        #     replace_string "oidc_provider_config/provider.yml" \
+        #                 "endpoint: \"/locallogin\"" \
+        #                 "endpoint: \"/oauth2/login\""
+        # fi
 
-        if [[ -n "$idp_url" ]]; then
-            switch_iag_to_oidc "iag_config/config.yaml"
-
-            replace_string "iag_config/config.yaml" \
-                        "discovery_endpoint: \"https://example.idp/oauth2/.well-known/openid-configuration\"" \
-                        "discovery_endpoint: \"$idp_url/oauth2/.well-known/openid-configuration\""
-        fi
-        
         # Start the services
-        docker-compose $action -d
-        
-        # Restore the original config file
-        echo "Restoring original IAG config..."
-        mv iag_config/config.yaml.bak iag_config/config.yaml
-        
+        docker-compose up -d
+
         popd > /dev/null
 
         # Wait for essential services to be ready
@@ -299,27 +277,28 @@ deploy_dc_agency() {
 
         echo "DC Agency service containers are now running."
         echo "Checking if DC agency services are fully up and functional..."
-        
+
         # Check if DC agency services are fully up and functional using Docker health check
-        check_dc_agency_services 20  # Try for up to 5 minutes (20 attempts with 15-second intervals)
+        check_dc_agency_services 60  # Try for up to 5 minutes (60 attempts with 5-second intervals)
         local services_status=$?
-        
+
         if [ $services_status -eq 0 ]; then
             echo "DC Agency services are fully up and functional!"
         else
             echo "Warning: DC Agency services may not be fully functional yet."
             echo "Continuing with deployment, but applications might not work correctly."
         fi
+
     else
         pushd dc-agency/docker > /dev/null
-        docker-compose $action
+        docker-compose down
         popd > /dev/null
         echo "DC Agency services have been stopped."
-        
+
         # Add warning about web apps needing redeployment only when undeploying dc-agency only
-        if [[ "$deploy_target" == "dc-agency" ]]; then
+        if [[ "$dc_agency_only" == "true" ]]; then
             echo ""
-            echo "⚠️  WARNING: If you have web applications (bank-app, dmv-app) currently deployed,"
+            echo "⚠️  WARNING: If you have web applications (bank-app, dmv-app, hr-portal) currently deployed,"
             echo "   you will need to redeploy them to ensure they are properly configured"
             echo "   with the new DC agency services when you start them again."
             echo ""
@@ -330,19 +309,19 @@ deploy_dc_agency() {
 # Function to initialize environment for web-apps
 initialize_environment() {
     echo "Initializing environment for web-apps..."
-    
+
     # Install required Python dependencies
     echo "Installing required Python dependencies..."
     pip install -r requirements.txt
-    
+
     # Run init.py with local development values
     echo "Running init.py to initialize the environment..."
-    
+
     # Set CUSTOM_CA_PATH for localhost deployment with self-signed certificates
     # Use the CA bundle which includes both the server cert and CA cert for proper chain validation
     local ca_bundle_path="$(pwd)/dc-agency/docker/ca-bundle.pem"
     local ca_cert_path="$(pwd)/dc-agency/docker/iviadc-ca.pem"
-    
+
     if [ -f "$ca_bundle_path" ]; then
         echo "Setting CUSTOM_CA_PATH to trust self-signed certificates: $ca_bundle_path"
         export CUSTOM_CA_PATH="$ca_bundle_path"
@@ -354,46 +333,31 @@ initialize_environment() {
         echo "Warning: CA certificate not found at $ca_cert_path"
         echo "Certificate validation may fail. Run './dc-agency/docker/setup.sh' to generate certificates."
     fi
-    
-    DMV_HOST=$dmv_app_url \
-    BANK_HOST=$bank_app_url \
-    AGENCY_URL=$agency_url \
-    VICAL_BASE_URL=$vical_url \
-    OIDC_TOKEN_ENDPOINT=$oidc_token_endpoint \
-    IDP_URL=$idp_url \
-    IDP_CLIENT_ID=$idp_client_id \
-    IDP_CLIENT_SECRET=$idp_client_secret \
-    IS_APP_PROD_DEPLOY=$is_app_prod_deploy \
-    CUSTOM_CA_PATH="$CUSTOM_CA_PATH" \
-    python3 init.py
-    
-    # Check if .env file was created successfully
-    if [ ! -f .env ]; then
-        echo "Error: .env file not found. init.py failed."
-        exit 1
-    fi
-    
-    echo "Environment initialized successfully."
+
+    run_init_py
+
+    # Check if per-app .env files were created successfully
+    check_env_files_exist
 }
 
 # Function to deploy web-apps
 deploy_web_apps() {
     local action=$1
     echo "Deploying web-apps ($action)..."
-    
+
     if [[ "$action" == "up" ]]; then
         # Check if DC agency services are running when deploying only web-apps
         if ! is_container_running "iviadcgw" || ! is_container_running "iviadcop" || ! is_container_running "iviadc"; then
             echo "Error: DC Agency services are not running. Please start them first with:"
-            echo "  $0 dc-agency up"
+            echo "  $0 deploy --dc-agency-only"
             exit 1
         fi
-        
+
         # Check if DC agency services are fully functional before initializing environment
         echo "Checking if DC agency services are fully functional before initializing web apps..."
         check_dc_agency_services 12
         local services_status=$?
-        
+
         if [ $services_status -ne 0 ]; then
             echo "Warning: DC Agency services are not fully functional yet."
             echo "Do you want to continue anyway? (y/n)"
@@ -406,33 +370,56 @@ deploy_web_apps() {
         else
             echo "DC Agency services are fully functional. Proceeding with web apps deployment."
         fi
-        
+
         # Initialize environment before starting web-apps
         initialize_environment
-        
-        # Build images first and check for failures
-        echo "Building web app images..."
-        docker-compose -f docker-compose-webapps.yml build
-        build_status=$?
-        if [ $build_status -ne 0 ]; then
-            echo "❌ Error: Failed to build web app images. Build exited with status $build_status."
-            echo "Please check the build output above for errors."
+
+        # ── Pre-flight: verify canonical local images exist ───────────────────
+        local missing_images=()
+        for img in bank-app dmv-app hr-portal; do
+            if ! docker image inspect "localhost/${img}:latest" &>/dev/null; then
+                missing_images+=("localhost/${img}:latest")
+            fi
+        done
+        if [[ ${#missing_images[@]} -gt 0 ]]; then
+            echo "❌ Error: The following required images are not available locally:"
+            for img in "${missing_images[@]}"; do
+                echo "     $img"
+            done
+            echo "Please run './build.sh' first to build the images."
             exit 1
         fi
-        echo "✅ Web app images built successfully."
-        
-        # Start the services after successful build
-        docker-compose -f docker-compose-webapps.yml $action -d
-        
+
+        # Start the services using pre-built images
+        docker-compose -f docker-compose-webapps.yml up -d
+
         # Wait for web apps to be ready
         wait_for_container "bank-app"
         wait_for_container "dmv-app"
-        
+        wait_for_container "hr-portal"
+
         echo "Web apps are now starting, it can take a few minutes before the webpages are accessible:"
-        echo "Bank App URL: http://localhost:8091"
-        echo "DMV App URL: http://localhost:8090"
+        echo "Bank App URL: https://localhost:8091"
+        echo "DMV App URL: https://localhost:8090"
+        echo "HR App URL: https://localhost:8092"
+        echo "(Note: your browser will show a certificate warning — the cert is self-signed by the local CA.)"
+        echo "To trust it permanently, import dc-agency/docker/iviadc-ca.pem into your browser/OS trust store."
+
+        save_state
+
     else
-        docker-compose -f docker-compose-webapps.yml $action
+        # Tear down IBM Verify provisioned objects before stopping containers.
+        # Credentials are always available here — prompt_for_missing_values guaranteed
+        # they were collected (or passed as flags) before we reached this point.
+        # Authentication failure is fatal — abort rather than tearing down containers
+        # with Verify objects still provisioned.
+        if ! teardown_verify_objects; then
+            echo "Error: IBM Verify teardown failed. Aborting undeploy."
+            echo "Fix the credentials and retry, or clean up IBM Verify objects manually."
+            return 1
+        fi
+
+        docker-compose -f docker-compose-webapps.yml down
         echo "Web apps have been stopped."
     fi
 }
@@ -440,82 +427,155 @@ deploy_web_apps() {
 ###############################################################################
 # Main line.
 
-# Parse arguments
-deploy_target="all"
-action="up"
+# Default values
+command="deploy"
+web_apps_only=false
+dc_agency_only=false
 
 # Local development values
-dmv_app_url="http://localhost:8090"
-bank_app_url="http://localhost:8091"
+dmv_app_url="https://localhost:8090"
+bank_app_url="https://localhost:8091"
+hr_app_url="https://localhost:8092"
 agency_url="https://localhost:8443/diagency"
 vical_url="https://iviadcgw:8443/diagency"
 oidc_token_endpoint="https://localhost:8443/oauth2/token"
 is_app_prod_deploy="false"
 
-# Initialize IDP variables
-idp_url=""
-idp_client_id=""
-idp_client_secret=""
+# IBM Verify bootstrap credentials
+dmv_verify_base_url=""
+dmv_verify_bootstrap_client_id=""
+dmv_verify_bootstrap_client_secret=""
+hr_verify_base_url=""
+hr_verify_bootstrap_client_id=""
+hr_verify_bootstrap_client_secret=""
+bank_verify_base_url=""
+bank_verify_bootstrap_client_id=""
+bank_verify_bootstrap_client_secret=""
+verify_setup_debug="false"
 
-default_idp_url="https://iviadcgw:8443"
-default_idp_client_id="localdeploy_dmv_client"
-default_idp_client_secret="localdeploy_dmv_client_secret"
-
-# Parse deploy target and action
+# Parse command
 if [[ $# -ge 1 ]]; then
-    if [[ "$1" == "all" || "$1" == "web-apps" || "$1" == "dc-agency" ]]; then
-        deploy_target="$1"
+    if [[ "$1" == "deploy" || "$1" == "undeploy" ]]; then
+        command="$1"
         shift
-    elif [[ "$1" == "--idp-client-id" || "$1" == "--idp-client-secret" || "$1" == "--idp-url" ]]; then
-        # It's a named option, don't shift yet
-        :
-    else
-        usage
     fi
 fi
 
-if [[ $# -ge 1 ]]; then
-    if [[ "$1" == "up" || "$1" == "down" ]]; then
-        action="$1"
-        shift
-    elif [[ "$1" == "--idp-client-id" || "$1" == "--idp-client-secret" || "$1" == "--idp-url" ]]; then
-        # It's a named option, don't shift yet
-        :
-    else
-        usage
-    fi
+# Parse options
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --web-apps-only)
+            web_apps_only=true
+            shift
+            ;;
+        --dc-agency-only)
+            dc_agency_only=true
+            shift
+            ;;
+        --debug)
+            verify_setup_debug="true"
+            shift
+            ;;
+        --dmv-verify-base-url)
+            dmv_verify_base_url="$2"
+            shift 2
+            ;;
+        --dmv-verify-bootstrap-client-id)
+            dmv_verify_bootstrap_client_id="$2"
+            shift 2
+            ;;
+        --dmv-verify-bootstrap-client-secret)
+            dmv_verify_bootstrap_client_secret="$2"
+            shift 2
+            ;;
+        --hr-verify-base-url)
+            hr_verify_base_url="$2"
+            shift 2
+            ;;
+        --hr-verify-bootstrap-client-id)
+            hr_verify_bootstrap_client_id="$2"
+            shift 2
+            ;;
+        --hr-verify-bootstrap-client-secret)
+            hr_verify_bootstrap_client_secret="$2"
+            shift 2
+            ;;
+        --bank-verify-base-url)
+            bank_verify_base_url="$2"
+            shift 2
+            ;;
+        --bank-verify-bootstrap-client-id)
+            bank_verify_bootstrap_client_id="$2"
+            shift 2
+            ;;
+        --bank-verify-bootstrap-client-secret)
+            bank_verify_bootstrap_client_secret="$2"
+            shift 2
+            ;;
+        --*)
+            echo "Unknown option: $1"
+            usage
+            ;;
+        *)
+            echo "Unexpected argument: $1"
+            usage
+            ;;
+    esac
+done
+
+# Validate options
+if [[ "$web_apps_only" == true && "$dc_agency_only" == true ]]; then
+    echo "Error: Cannot specify both --web-apps-only and --dc-agency-only"
+    usage
 fi
 
-# Parse named options
-parse_named_options "$@"
-
-# Prompt for missing values if needed
-prompt_for_missing_values
-
-# Execute deployment based on target
-case "$deploy_target" in
-    "all")
-        if [[ "$action" == "up" ]]; then
-            # For "up" action, deploy dc-agency first, then web-apps
+# Execute command
+case "$command" in
+    "deploy")
+        # Prompt for credentials before doing any work
+        prompt_for_missing_values
+        if [[ "$dc_agency_only" == true ]]; then
             deploy_dc_agency "up"
+        elif [[ "$web_apps_only" == true ]]; then
             deploy_web_apps "up"
         else
-            # For "down" action, stop web-apps first, then dc-agency
-            deploy_web_apps "down"
-            deploy_dc_agency "down"
+            # Deploy both, dc-agency first
+            deploy_dc_agency "up"
+            deploy_web_apps "up"
         fi
         ;;
-    "dc-agency")
-        deploy_dc_agency "$action"
-        ;;
-    "web-apps")
-        deploy_web_apps "$action"
+    "undeploy")
+        # Confirm first, then prompt for credentials — mirrors the OpenShift flow
+        if [[ "$dc_agency_only" == true ]]; then
+            read -p "Are you sure you want to undeploy dc-agency services? (y/n): " confirm
+        elif [[ "$web_apps_only" == true ]]; then
+            read -p "Are you sure you want to undeploy web apps? (y/n): " confirm
+        else
+            read -p "Are you sure you want to undeploy ALL local services? (y/n): " confirm
+        fi
+
+        if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
+            echo "Undeploy operation cancelled."
+            exit 0
+        fi
+
+        # Credentials are only needed when web-apps are being undeployed
+        prompt_for_missing_values
+
+        # Proceed with undeployment
+        if [[ "$dc_agency_only" == true ]]; then
+            deploy_dc_agency "down"
+        elif [[ "$web_apps_only" == true ]]; then
+            deploy_web_apps "down" || exit 1
+        else
+            # Undeploy both, web-apps first (abort if Verify teardown fails)
+            deploy_web_apps "down" || exit 1
+            deploy_dc_agency "down"
+        fi
         ;;
     *)
         usage
         ;;
 esac
 
-echo "Deployment completed successfully."
-
-# Made with Bob
+echo "Operation completed successfully."

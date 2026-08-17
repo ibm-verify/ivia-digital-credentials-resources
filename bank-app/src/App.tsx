@@ -1,5 +1,9 @@
-import React, { useEffect, useState } from 'react';
-import { Routes, Route, useNavigate } from 'react-router-dom';
+import React, { useEffect } from 'react'; 
+import { Routes, Route, useNavigate } from 'react-router';
+import { AuthProvider, useAuth } from './components/AuthProvider';
+import OidcCallback from './components/OidcCallback';
+import LogoutCallback from './components/LogoutCallback';
+import ProtectedRoute from './components/ProtectedRoute';
 import {
   AppBar,
   Toolbar,
@@ -16,6 +20,7 @@ import {
 import HomePage from './pages/HomePage';
 import SignupPage from './pages/SignupPage';
 import SuccessPage from './pages/SuccessPage';
+import ProfilePage from './pages/ProfilePage';
 
 // Components
 import Footer from './components/Footer';
@@ -68,9 +73,15 @@ const theme = createTheme({
   },
 });
 
-const App: React.FC = () => {
-  const navigate = useNavigate();
-  
+const AppContent: React.FC = () => {
+  const navigate= useNavigate();
+  const {login, logout, loginWithPasskey, isAuthenticated} = useAuth();
+
+  const handlePasskeyLogin = async () => {
+    const user = await loginWithPasskey();
+    if (user) navigate('/profile');
+  };
+
   // Initialize the API server when the app starts
   useEffect(() => {
     const initializeApi = async () => {
@@ -80,10 +91,8 @@ const App: React.FC = () => {
   }, []);
 
   return (
-    <ThemeProvider theme={theme}>
-      <CssBaseline />
-      <div className="bank-app">
-        <AppBar position="static" color="transparent" elevation={0}>
+    <div className="bank-app">
+      <AppBar position="static" color="transparent" elevation={0}>
           <Toolbar>
             <Box
               display="flex"
@@ -112,6 +121,7 @@ const App: React.FC = () => {
                 Smart money.
               </Typography>
             </Box>
+
             <Box sx={{ display: 'flex', gap: 2 }}>
               <Button color="inherit" onClick={(e) => e.preventDefault()}>About</Button>
               <Button color="inherit" onClick={(e) => e.preventDefault()}>Services</Button>
@@ -119,21 +129,53 @@ const App: React.FC = () => {
               <Button color="inherit" onClick={(e) => e.preventDefault()}>Resources</Button>
               <Button color="inherit" onClick={(e) => e.preventDefault()}>Contact Us</Button>
             </Box>
+
             <Box sx={{ display: 'flex', gap: 2, ml: 4 }}>
               <Button color="inherit" href="/signup">Sign Up</Button>
-              <Button variant="contained" color="primary" onClick={(e) => e.preventDefault()}>Login</Button>
+
+              {isAuthenticated ? (
+                <Button variant="contained" color="primary" onClick={logout}>
+                  Logout
+                </Button>
+              ) : (
+                <>
+                  <Button variant="contained" color="primary" onClick={login}>
+                    Login
+                  </Button>
+                  <Button variant="contained" color="primary" onClick={handlePasskeyLogin}>
+                    Login with Passkey
+                  </Button>
+                </>
+              )}
             </Box>
           </Toolbar>
         </AppBar>
+
         <Container className="bank-content" maxWidth="lg" sx={{ flex: 1 }}>
           <Routes>
             <Route path="/" element={<HomePage />} />
             <Route path="/signup" element={<SignupPage />} />
             <Route path="/success" element={<SuccessPage />} />
+            <Route path="/profile" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
+            <Route path="/logincallback" element={<OidcCallback />} />
+            <Route path="/logoutcallback" element={<LogoutCallback />} /> 
+            <Route path="*" element={<HomePage />} />
           </Routes>
         </Container>
+
         <Footer />
-      </div>
+    </div>
+  );
+}
+
+
+const App: React.FC = () => {
+  return (
+    <ThemeProvider theme={theme}>
+      <CssBaseline />
+      <AuthProvider>
+        <AppContent />
+      </AuthProvider>
     </ThemeProvider>
   );
 };

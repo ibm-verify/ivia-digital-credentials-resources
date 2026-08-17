@@ -32,83 +32,131 @@ spec:
         - name: ACCOUNT_URL
           valueFrom:
             configMapKeyRef:
-              name: oid4vc-config
+              name: oid4vc-config-dmv
               key: ACCOUNT_URL
         - name: REACT_APP_ACCOUNT_URL
           valueFrom:
             configMapKeyRef:
-              name: oid4vc-config
+              name: oid4vc-config-dmv
               key: REACT_APP_ACCOUNT_URL
         - name: REACT_APP_TOKEN_ENDPOINT
           valueFrom:
             configMapKeyRef:
-              name: oid4vc-config
+              name: oid4vc-config-dmv
               key: REACT_APP_TOKEN_ENDPOINT
         - name: DMV_AGENT_ID
           valueFrom:
             configMapKeyRef:
-              name: oid4vc-config
+              name: oid4vc-config-dmv
               key: DMV_AGENT_ID
         - name: REACT_APP_DMV_AGENT_ID
           valueFrom:
             configMapKeyRef:
-              name: oid4vc-config
+              name: oid4vc-config-dmv
               key: REACT_APP_DMV_AGENT_ID
+        - name: DMV_AGENT_CLIENT_ID
+          valueFrom:
+            configMapKeyRef:
+              name: oid4vc-config-dmv
+              key: DMV_AGENT_CLIENT_ID
+        - name: REACT_APP_DMV_AGENT_CLIENT_ID
+          valueFrom:
+            configMapKeyRef:
+              name: oid4vc-config-dmv
+              key: REACT_APP_DMV_AGENT_CLIENT_ID
         - name: DMV_AGENT_PASSWORD
           valueFrom:
             configMapKeyRef:
-              name: oid4vc-config
+              name: oid4vc-config-dmv
               key: DMV_AGENT_PASSWORD
         - name: REACT_APP_DMV_AGENT_PASSWORD
           valueFrom:
             configMapKeyRef:
-              name: oid4vc-config
+              name: oid4vc-config-dmv
               key: REACT_APP_DMV_AGENT_PASSWORD
         - name: CREDENTIAL_SCHEMA_ID
           valueFrom:
             configMapKeyRef:
-              name: oid4vc-config
+              name: oid4vc-config-dmv
               key: CREDENTIAL_SCHEMA_ID
         - name: REACT_APP_CREDENTIAL_SCHEMA_ID
           valueFrom:
             configMapKeyRef:
-              name: oid4vc-config
+              name: oid4vc-config-dmv
               key: REACT_APP_CREDENTIAL_SCHEMA_ID
         - name: CREDENTIAL_DEFINITION_ID
           valueFrom:
             configMapKeyRef:
-              name: oid4vc-config
+              name: oid4vc-config-dmv
               key: CREDENTIAL_DEFINITION_ID
         - name: REACT_APP_CREDENTIAL_DEFINITION_ID
           valueFrom:
             configMapKeyRef:
-              name: oid4vc-config
+              name: oid4vc-config-dmv
               key: REACT_APP_CREDENTIAL_DEFINITION_ID
-        - name: REACT_APP_CLIENT_ID
+        - name: REACT_APP_DMV_CLIENT_ID
           valueFrom:
             configMapKeyRef:
-              name: oid4vc-config
-              key: REACT_APP_CLIENT_ID
-        - name: REACT_APP_CLIENT_SECRET
+              name: oid4vc-config-dmv
+              key: REACT_APP_DMV_CLIENT_ID
+        - name: REACT_APP_DMV_CLIENT_SECRET
           valueFrom:
             configMapKeyRef:
-              name: oid4vc-config
-              key: REACT_APP_CLIENT_SECRET
+              name: oid4vc-config-dmv
+              key: REACT_APP_DMV_CLIENT_SECRET
         - name: REACT_APP_DMV_REDIRECT_URL
           valueFrom:
             configMapKeyRef:
-              name: oid4vc-config
-              key: DMV_REDIRECT_URL
-        - name: W3_ROOT
+              name: oid4vc-config-dmv
+              key: REACT_APP_DMV_REDIRECT_URL
+        - name: REACT_APP_DMV_LOGOUT_REDIRECT_URL
           valueFrom:
             configMapKeyRef:
-              name: oid4vc-config
-              key: W3_ROOT
-        - name: REACT_APP_W3_ROOT
+              name: oid4vc-config-dmv
+              key: REACT_APP_DMV_LOGOUT_REDIRECT_URL
+        - name: REACT_APP_DMV_W3_ROOT
           valueFrom:
             configMapKeyRef:
-              name: oid4vc-config
-              key: REACT_APP_W3_ROOT
+              name: oid4vc-config-dmv
+              key: REACT_APP_DMV_W3_ROOT
+        - name: IBM_VERIFY_BASE_URL
+          valueFrom:
+            configMapKeyRef:
+              name: oid4vc-config-dmv
+              key: IBM_VERIFY_BASE_URL
+        - name: IBM_VERIFY_TOKEN_URL
+          valueFrom:
+            configMapKeyRef:
+              name: oid4vc-config-dmv
+              key: IBM_VERIFY_TOKEN_URL
+        - name: IBM_VERIFY_CLIENT_ID
+          valueFrom:
+            configMapKeyRef:
+              name: oid4vc-config-dmv
+              key: IBM_VERIFY_CLIENT_ID
+        - name: IBM_VERIFY_CLIENT_SECRET
+          valueFrom:
+            configMapKeyRef:
+              name: oid4vc-config-dmv
+              key: IBM_VERIFY_CLIENT_SECRET
+        - name: IBM_VERIFY_FIDO2_RELYING_PARTY_ID
+          valueFrom:
+            configMapKeyRef:
+              name: oid4vc-config-dmv
+              key: IBM_VERIFY_FIDO2_RELYING_PARTY_ID
+        volumeMounts:
+        - name: webapps-tls
+          mountPath: /certs
+          readOnly: true
+      volumes:
+      - name: webapps-tls
+        secret:
+          secretName: oid4vc-webapps-tls
+          items:
+          - key: tls.crt
+            path: webapps.crt
+          - key: tls.key
+            path: webapps.key
 ---
 apiVersion: v1
 kind: Service
@@ -121,5 +169,3 @@ spec:
   - port: 8090
     targetPort: 3000
   type: ClusterIP
-
-# Made with Bob

@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router';
 import { CircularProgress, Box, Typography } from '@mui/material';
 import { Header } from './Header';
 import { useAuth } from './AuthProvider';
@@ -16,6 +16,7 @@ const OidcCallback: React.FC = () => {
     (async () => {
       const user = await loginCallback();
       if (user) navigate("/profile");
+      else navigate("/");
     })();
   }, [loginCallback, navigate]);
 

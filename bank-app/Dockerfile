@@ -13,13 +13,16 @@ RUN npm install npm@latest -g
 
 # Copy package files first for better caching
 COPY ./bank-app/package*.json /opt/app/
-RUN npm install
+RUN --mount=type=cache,target=/root/.npm npm ci
 
 # Copy the rest of the application
 COPY ./bank-app /opt/app/
 
 # Build the application
 RUN npm run build
+
+# Remove devDependencies - only production deps needed at runtime
+RUN npm ci --omit=dev
 
 # Runtime stage - only Node.js, no npm
 FROM registry.access.redhat.com/ubi9/ubi-minimal:latest
@@ -32,6 +35,9 @@ RUN microdnf module enable -y nodejs:22 && \
     microdnf update -y && \
     microdnf remove -y findutils && \
     microdnf clean all
+
+# Remove npm and corepack bundled by the nodejs RPM into /usr/lib/node_modules
+RUN rm -rf /usr/lib/node_modules
 
 # Copy built application and production dependencies from build stage
 COPY --from=build /opt/app/ /opt/app/

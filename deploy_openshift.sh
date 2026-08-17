@@ -2,8 +2,12 @@
 
 #
 # This script is used to manage the deployment of the OID4VC sample apps
-# (bank-app and dmv-app) and dc-agency services in OpenShift.
+# (bank-app, dmv-app and hr-portal) and dc-agency services in OpenShift.
 #
+
+# Load shared helper functions
+# shellcheck source=common_functions.sh
+source "$(dirname "$0")/common_functions.sh"
 
 ###############################################################################
 # Constants.
@@ -11,7 +15,10 @@
 # Web apps constants
 bank_app_name="bank-app"
 dmv_app_name="dmv-app"
-config_map_name="oid4vc-config"
+hr_app_name="hr-portal"
+bank_config_map_name="oid4vc-config-bank"
+dmv_config_map_name="oid4vc-config-dmv"
+hr_config_map_name="oid4vc-config-hr"
 vc_repo_secret="isva-vc-repo-dal" # pragma: allowlist secret
 
 # DC Agency constants
@@ -23,7 +30,7 @@ ca_configmap="isva-vc-iviadc-ca"
 vc_accountname="isva-vc"
 route=iviadcgw
 
-instructions="This script is used to deploy the OID4VC sample apps (bank-app and dmv-app)
+instructions="This script is used to deploy the OID4VC sample apps (bank-app, dmv-app and hr-portal)
 and dc-agency services to an OpenShift cluster.
 
 Usage:
@@ -42,10 +49,24 @@ Required Parameters:
   --registry-namespace <ns>  Registry namespace
 
   For deploy only (in addition to the two arguments above):
-  --idp-url <url>            IDP URL
-  --idp-client-id <id>       IDP Client ID
-  --idp-client-secret <s>    IDP Client secret
-  --apps-domain <domain>     Domain for app routes (optional, if omitted routes will be created without host specification and openshift will automatically create a route for you)
+  --apps-domain <domain>     Domain for app routes (optional; omit for OpenShift auto-generated routes)
+
+  IBM Verify bootstrap credentials (mandatory for web-app deployment):
+  --dmv-verify-base-url <url>              DMV IBM Verify tenant base URL
+                                           (default: https://demos.verify.ibm.com)
+  --dmv-verify-bootstrap-client-id <id>   DMV IBM Verify bootstrap API client ID (mandatory)
+  --dmv-verify-bootstrap-client-secret <s> DMV IBM Verify bootstrap API client secret (mandatory)
+
+  --hr-verify-base-url <url>               HR IBM Verify tenant base URL
+                                           (currently always inherited from DMV — IAG limitation)
+  --hr-verify-bootstrap-client-id <id>    HR IBM Verify bootstrap API client ID
+                                           (currently always inherited from DMV — IAG limitation)
+  --hr-verify-bootstrap-client-secret <s> HR IBM Verify bootstrap API client secret
+                                           (currently always inherited from DMV — IAG limitation)
+
+  --bank-verify-base-url <url>             Bank IBM Verify tenant base URL (mandatory)
+  --bank-verify-bootstrap-client-id <id>  Bank IBM Verify bootstrap API client ID (mandatory)
+  --bank-verify-bootstrap-client-secret <s> Bank IBM Verify bootstrap API client secret (mandatory)
 
   For create-secret:
   --registry <url>           Container registry URL
@@ -55,6 +76,7 @@ Required Parameters:
 Options:
   --web-apps-only            Deploy only the web apps
   --dc-agency-only           Deploy only the dc-agency services
+  --debug                    Print full IBM Verify app provisioning request/response payloads
 
 Notes:
   - If required parameters are not provided, you will be prompted to enter them interactively
@@ -64,27 +86,34 @@ Notes:
     * Tenant0 Admin secret (client_id: 00000000-0000-4000-8000-000000000000)
     * Tenant1 Admin secret (client_id: 11111111-1111-4111-8111-111111111111)
   - You will also be prompted to select which tenant (0 or 1) to use for initialization
+  - If any of the four secrets are left blank, a password is automatically generated and used
   - Admin secrets must NOT be 'secret' for security reasons
+  - Bootstrap credentials are used once to provision OIDC apps, API clients, and FIDO2 RPs
+    in each IBM Verify tenant; the provisioned credentials are written into each app's ConfigMap
+  - HR bootstrap credentials always inherit DMV's values (IAG limitation — see common_functions.sh)
+  - ⚠️  Bank: users and groups will be created in the bank IBM Verify tenant during deployment
+  - Each app's ConfigMap is created separately: oid4vc-config-bank, oid4vc-config-dmv, oid4vc-config-hr
+  - On undeploy, the provisioned IBM Verify objects (apps, FIDO2 RPs, bank group) are deleted
 
 Examples:
-  $0 build --registry icr.io --registry-namespace myorg/myrepo my-project  # Build web app images
-  $0 push --registry icr.io --registry-namespace myorg/myrepo my-project   # Push web app images to registry
-  $0 create-secret --registry icr.io --docker-username iamapikey --docker-password <apikey>  # Create repository secret
-  
-  # Deploy both dc-agency and web-apps (default)
-  $0 deploy --registry icr.io --registry-namespace myorg/myrepo --apps-domain example.com --idp-url https://example.com --idp-client-id abc123 --idp-client-secret xyz789 my-project
-  
-  # Deploy only web-apps without specifying a domain (OpenShift will auto-generate route names)
-  $0 deploy --registry icr.io --registry-namespace myorg/myrepo --web-apps-only --idp-url https://example.com --idp-client-id abc123 --idp-client-secret xyz789 my-project
-  
-  # Deploy only dc-agency services
-  $0 deploy --registry icr.io --registry-namespace myorg/myrepo --dc-agency-only --idp-client-id abc123 --idp-client-secret xyz789 my-project
-  
-  # Undeploy services
-  $0 undeploy my-project                            # Undeploy both
-  $0 undeploy --web-apps-only my-project            # Undeploy only web-apps
-  $0 undeploy --dc-agency-only my-project           # Undeploy only dc-agency services
+  $0 build --registry icr.io --registry-namespace myorg/myrepo my-project
+  $0 push --registry icr.io --registry-namespace myorg/myrepo my-project
+  $0 create-secret --registry icr.io --docker-username iamapikey --docker-password <apikey>
 
+  # Deploy both dc-agency and web-apps
+  $0 deploy --registry icr.io --registry-namespace myorg/myrepo --apps-domain example.com \\
+      --dmv-verify-base-url https://demos.verify.ibm.com \\
+      --dmv-verify-bootstrap-client-id abc123 --dmv-verify-bootstrap-client-secret xyz789 \\
+      --bank-verify-base-url https://bank.verify.ibm.com \\
+      --bank-verify-bootstrap-client-id bk123 --bank-verify-bootstrap-client-secret bksecret \\
+      my-project
+
+  # Undeploy services (also tears down IBM Verify objects)
+  $0 undeploy my-project
+  $0 undeploy --web-apps-only my-project
+  $0 undeploy --dc-agency-only my-project
+
+Note: <oc-project-name> is mandatory for all commands.
 Note: When deploying both services, dc-agency services are deployed first, followed by web-apps.
 "
 
@@ -99,16 +128,9 @@ usage()
 
 ###############################################################################
 # Helper functions.
-
-replace_string()
-{
-    file=$1
-    from=$2
-    to=$3
-
-    sed "s|$from|$to|g" $file > $file.tmp
-    mv "$file.tmp" "$file"
-}
+# Note: replace_string(), switch_iag_to_oidc(), prompt_for_verify_credentials(),
+#       prompt_for_undeploy_verify_credentials(), teardown_verify_objects(), and
+#       check_env_files_exist() are defined in common_functions.sh.
 
 get_host()
 {
@@ -126,53 +148,6 @@ get_host()
     fi
 
     echo "$host"
-}
-
-# Function to switch IAG config from EAI to OIDC authentication
-switch_iag_to_oidc()
-{
-    local config_file="./dc-agency/docker/iag_config/config.yaml"
-    if [ -f "$1" ]; then
-        config_file="$1"
-    fi
-    
-    if [ ! -f "$config_file" ]; then
-        echo "Error: IAG config file not found at $config_file"
-        return 1
-    fi
-    
-    echo "Switching IAG authentication from EAI to OIDC..."
-    
-    # Create a backup
-    cp "$config_file" "$config_file.bak"
-    
-    # Use awk to toggle between eai and oidc sections
-    awk '
-    /^  eai:/ { in_eai=1; print "#" $0; next }
-    /^    triggers:/ && in_eai { print "#" $0; next }
-    /^    - \/locallogin\*/ && in_eai { print "#" $0; in_eai=0; next }
-    /^#  oidc:/ { in_oidc=1; sub(/^#  /, "  "); print; next }
-    /^#    discovery_endpoint:/ && in_oidc { sub(/^#    /, "    "); print; next }
-    /^#    client_id:/ && in_oidc { sub(/^#    /, "    "); print; next }
-    /^#    client_secret:/ && in_oidc { sub(/^#    /, "    "); print; next }
-    /^#    pkce:/ && in_oidc { sub(/^#    /, "    "); print; in_oidc=0; next }
-    { print }
-    ' "$config_file" > "$config_file.tmp"
-    
-    # Replace original file with modified version
-    mv "$config_file.tmp" "$config_file"
-    
-    echo "IAG config updated: EAI commented out, OIDC enabled"
-    return 0
-}
-
-# Function to check if .env file exists
-check_env_file()
-{
-    if [ ! -f .env ]; then
-        echo "Error: .env file not found. Please run init.py first."
-        exit 1
-    fi
 }
 
 # Function to check if a project exists
@@ -289,7 +264,7 @@ check_service_health() {
     local max_attempts=$2
     
     if [ -z "$max_attempts" ]; then
-        max_attempts=20  # Default to 20 attempts (5 minutes with 15-second intervals)
+        max_attempts=60  # Default to 60 attempts (5 minutes with 5-second intervals)
     fi
     
     local attempt=1
@@ -309,8 +284,8 @@ check_service_health() {
             echo "❌ $service_name health status: $health_status (waiting for 'True')"
         fi
         
-        echo "Waiting for 15 seconds before next check..."
-        sleep 15
+        echo "Waiting for 5 seconds before next check..."
+        sleep 5
         ((attempt++))
     done
     
@@ -323,7 +298,7 @@ check_dc_agency_services() {
     local max_attempts=$1
     
     if [ -z "$max_attempts" ]; then
-        max_attempts=20  # Default to 20 attempts (5 minutes with 15-second intervals)
+        max_attempts=60  # Default to 60 attempts (5 minutes with 5-second intervals)
     fi
     
     echo "Checking if DC agency services are fully up and functional..."
@@ -352,75 +327,80 @@ prompt_for_missing_values() {
         if [[ -z "$registry_url" ]]; then
             read -p "Enter container registry URL: " registry_url
         fi
-        
+
         if [[ -z "$registry_namespace" ]]; then
             read -p "Enter registry namespace: " registry_namespace
         fi
     fi
-    
+
     # For create-secret command
     if [[ "$command" == "create-secret" ]]; then
         if [[ -z "$registry_url" ]]; then
             read -p "Enter container registry URL: " registry_url
         fi
-        
+
         if [[ -z "$docker_username" ]]; then
             read -p "Enter Docker registry username: " docker_username
         fi
-        
+
         if [[ -z "$docker_password" ]]; then
             read -s -p "Enter Docker registry password/API key: " docker_password
             echo
         fi
     fi
-    
+
     # For deploy command
     if [[ "$command" == "deploy" ]]; then
-        if [[ "$web_apps_only" == true || "$dc_agency_only" != true ]]; then
-            if [[ -z "$idp_url" ]]; then
-                read -p "Enter IDP URL: " idp_url
-            fi
-        fi
-        
-        if [[ -z "$idp_client_id" ]]; then
-            read -p "Enter IDP client ID: " idp_client_id
-        fi
-        
-        if [[ -z "$idp_client_secret" ]]; then
-            read -s -p "Enter IDP client secret: " idp_client_secret
-            echo
-        fi
-        
+
+        # IBM Verify bootstrap credentials (shared logic in common_functions.sh)
+        prompt_for_verify_credentials
+
         # Prompt for Postgres password
         if [[ -z "$postgres_password" ]]; then
-            read -s -p "Enter Postgres password: " postgres_password
+            read -s -p "Enter Postgres password (leave blank to auto-generate): " postgres_password
             echo
         fi
-        
+        if [[ -z "$postgres_password" ]]; then
+            postgres_password=$(uuidgen | tr '[:upper:]' '[:lower:]')
+            echo "Auto-generated Postgres password: $postgres_password"
+        fi
+
         # Prompt for admin secrets
         if [[ -z "$deployment_admin_secret" ]]; then
-            read -s -p "Enter secret for Deployment Admin (DO NOT USE '${illegal_admin_password}'): " deployment_admin_secret
+            read -s -p "Enter secret for Deployment Admin (leave blank to auto-generate, DO NOT USE '${illegal_admin_password}'): " deployment_admin_secret
             echo
+        fi
+        if [[ -z "$deployment_admin_secret" ]]; then
+            deployment_admin_secret=$(uuidgen | tr '[:upper:]' '[:lower:]')
+            echo "Auto-generated Deployment Admin secret: $deployment_admin_secret"
         fi
 
         if [ "$deployment_admin_secret" == "$illegal_admin_password" ]; then
             echo "Invalid deployment admin secret. Please do not use '${illegal_admin_password}'."
             exit 1
         fi
-        
+
         if [[ -z "$tenant0_admin_secret" ]]; then
-            read -s -p "Enter secret for Tenant0 Admin (DO NOT USE '${illegal_admin_password}'): " tenant0_admin_secret
+            read -s -p "Enter secret for Tenant0 Admin (leave blank to auto-generate, DO NOT USE '${illegal_admin_password}'): " tenant0_admin_secret
             echo
+        fi
+        if [[ -z "$tenant0_admin_secret" ]]; then
+            tenant0_admin_secret=$(uuidgen | tr '[:upper:]' '[:lower:]')
+            echo "Auto-generated Tenant0 Admin secret: $tenant0_admin_secret"
         fi
 
         if [ "$tenant0_admin_secret" == "$illegal_admin_password" ]; then
             echo "Invalid tenant0 admin secret. Please do not use '${illegal_admin_password}'."
             exit 1
         fi
-        
+
         if [[ -z "$tenant1_admin_secret" ]]; then
-            read -s -p "Enter secret for Tenant1 Admin (DO NOT USE '${illegal_admin_password}'): " tenant1_admin_secret
+            read -s -p "Enter secret for Tenant1 Admin (leave blank to auto-generate, DO NOT USE '${illegal_admin_password}'): " tenant1_admin_secret
             echo
+        fi
+        if [[ -z "$tenant1_admin_secret" ]]; then
+            tenant1_admin_secret=$(uuidgen | tr '[:upper:]' '[:lower:]')
+            echo "Auto-generated Tenant1 Admin secret: $tenant1_admin_secret"
         fi
 
         if [ "$tenant1_admin_secret" == "$illegal_admin_password" ]; then
@@ -452,67 +432,102 @@ prompt_for_missing_values() {
 }
 
 ###############################################################################
+# Save / load deployment state (structural flags only — no credentials).
+
+state_file()
+{
+    local proj="${project_name:-default}"
+    echo ".deploy-state.${proj}"
+}
+
+save_state()
+{
+    local file
+    file=$(state_file)
+    cat > "$file" <<EOF
+registry_url='${registry_url}'
+registry_namespace='${registry_namespace}'
+apps_domain='${apps_domain}'
+project_name='${project_name}'
+EOF
+    chmod 600 "$file"
+    echo "Deployment state saved to $file"
+}
+
+load_state()
+{
+    local file
+    file=$(state_file)
+    if [ ! -f "$file" ]; then
+        echo "Error: No saved state found at $file."
+        echo "Run a full 'deploy' first, or pass --registry / --registry-namespace / --apps-domain explicitly."
+        exit 1
+    fi
+    # shellcheck source=/dev/null
+    source "$file"
+    echo "Loaded deployment state from $file"
+}
+
+# prompt_for_undeploy_verify_credentials is defined in common_functions.sh.
+
+###############################################################################
 # Build Docker images for the apps.
+# Delegates entirely to build.sh — the canonical single build entry point.
 
 build()
 {
-    echo "Building Docker images for the apps..."
-
-    # Check whether we received a project name and should add the name as a suffix on the images
-    if [[ -n "$1" ]]; then
-        suffix="-$1"
-    else
-        suffix=""
-    fi
-    
-    # Build the bank-app image
-    echo "Building bank-app$suffix image..."
-    docker build --platform linux/amd64 -t $registry_url/$registry_namespace/bank-app$suffix:latest -f ./bank-app/Dockerfile .
-    bank_build_status=$?
-    if [ $bank_build_status -ne 0 ]; then
-        echo "❌ Error: Failed to build bank-app image. Build exited with status $bank_build_status."
-        echo "Please check the build output above for errors."
-        exit 1
-    fi
-    echo "✅ bank-app image built successfully."
-    
-    # Build the dmv-app image
-    echo "Building dmv-app$suffix image..."
-    docker build --platform linux/amd64 -t $registry_url/$registry_namespace/dmv-app$suffix:latest -f ./dmv-app/Dockerfile .
-    dmv_build_status=$?
-    if [ $dmv_build_status -ne 0 ]; then
-        echo "❌ Error: Failed to build dmv-app image. Build exited with status $dmv_build_status."
-        echo "Please check the build output above for errors."
-        exit 1
-    fi
-    echo "✅ dmv-app image built successfully."
-    
-    echo "✅ All Docker images built successfully."
+    "$(dirname "$0")/build.sh"
 }
 
 ###############################################################################
 # Push Docker images to the registry.
+# Requires canonical local images (bank-app:latest etc.) to have been built
+# first via ./build.sh.  Re-tags them for the target registry, then pushes.
 
 push()
 {
-    echo "Pushing Docker images to registry: $registry_url/$registry_namespace"
-
     # Check whether we received a project name and should use the name as a suffix on the images
     if [[ -n "$1" ]]; then
         suffix="-$1"
     else
         suffix=""
     fi
-    
-    # Push bank-app image
+
+    # ── Pre-flight: verify canonical local images exist ───────────────────────
+    local missing_images=()
+    for img in bank-app dmv-app hr-portal; do
+        if ! docker image inspect "localhost/${img}:latest" &>/dev/null; then
+            missing_images+=("localhost/${img}:latest")
+        fi
+    done
+    if [[ ${#missing_images[@]} -gt 0 ]]; then
+        echo "❌ Error: The following required images are not available locally:"
+        for img in "${missing_images[@]}"; do
+            echo "     $img"
+        done
+        echo "Please run './build.sh' first to build the images."
+        exit 1
+    fi
+
+    # ── Re-tag canonical images for the target registry ───────────────────────
+    echo "Re-tagging images for registry: $registry_url/$registry_namespace"
+    docker tag localhost/bank-app:latest  $registry_url/$registry_namespace/bank-app$suffix:latest
+    docker tag localhost/dmv-app:latest   $registry_url/$registry_namespace/dmv-app$suffix:latest
+    docker tag localhost/hr-portal:latest $registry_url/$registry_namespace/hr-portal$suffix:latest
+
+    # ── Push ──────────────────────────────────────────────────────────────────
+    echo "Pushing Docker images to registry: $registry_url/$registry_namespace"
+
     echo "Pushing bank-app$suffix image..."
     docker push $registry_url/$registry_namespace/bank-app$suffix:latest
-    
-    # Push dmv-app image
+
     echo "Pushing dmv-app$suffix image..."
     docker push $registry_url/$registry_namespace/dmv-app$suffix:latest
-    
-    echo "Docker images pushed successfully."
+
+    echo "Pushing hr-portal$suffix image..."
+    docker push $registry_url/$registry_namespace/hr-portal$suffix:latest
+
+    echo "✅ Docker images pushed successfully."
 }
 
 ###############################################################################
@@ -530,8 +545,12 @@ deploy_web_apps()
     local original_project_name=""
     
     if [[ -n "$project_name" ]]; then
-        # Project name was specified
-        suffix="-$project_name"
+        # Project name was specified; omit suffix for "prod" so hostnames are undecorated
+        if [[ "$project_name" == "prod" ]]; then
+            suffix=""
+        else
+            suffix="-$project_name"
+        fi
         
         # Get the current project name
         original_project_name=$(oc project -q)
@@ -559,6 +578,8 @@ deploy_web_apps()
                     "host: dmv-dc.example.com" "host: dmv-dc$suffix.$apps_domain"
         replace_string $temp/routes.yaml \
                     "host: bank-dc.example.com" "host: bank-dc$suffix.$apps_domain"
+        replace_string $temp/routes.yaml \
+                    "host: hr-dc.example.com" "host: hr-dc$suffix.$apps_domain"
     else
         # If apps_domain is not provided, remove the host lines
         # Use a more compatible sed syntax that works on both macOS and Linux
@@ -574,40 +595,23 @@ deploy_web_apps()
     # Determine hostnames from routes
     set -e; BANK_HOST=`get_host $bank_app_name "BANK_HOST"`; set +e
     set -e; DMV_HOST=`get_host $dmv_app_name "DMV_HOST"`; set +e
+    set -e; HR_HOST=`get_host $hr_app_name "HR_HOST"`; set +e
 
     # Get the gateway host for agency URL and token endpoint
     set -e; GATEWAY_HOST=`get_host $route "GATEWAY_HOST"`; set +e
     agency_url="https://$GATEWAY_HOST/diagency"
     oidc_token_endpoint="https://$GATEWAY_HOST/oauth2/token"
 
-    # Check if DC agency services are fully healthy before initializing environment
-    if [[ "$dc_agency_only" != "true" ]]; then
-        echo "Checking if DC agency services are fully healthy before initializing web apps..."
-        
-        # Specifically check iviadcop service health as it's critical for web apps
-        check_service_health "iviadcop" 12
-        local iviadcop_status=$?
-        
-        # Also check iviadc service health
-        check_service_health "iviadc" 12
-        local iviadc_status=$?
-        
-        if [ $iviadcop_status -ne 0 ] || [ $iviadc_status -ne 0 ]; then
-            echo "Warning: Required DC Agency services are not fully healthy yet."
-            echo "Do you want to continue anyway? (y/n)"
-            read -r response
-            if [[ "$response" != "y" ]]; then
-                echo "Deployment aborted."
-                exit 1
-            fi
-            echo "Continuing with deployment despite potential issues..."
-        else
-            echo "DC Agency services are fully healthy. Proceeding with web apps deployment."
-        fi
-    fi
-
-    # Run init.py to create the .env file with all required variables
+    # Run init.py NOW — before waiting for dc-agency pods to be healthy.
+    # IBM Verify provisioning (apps, FIDO2 RPs, group) is a pure SaaS API operation
+    # that does not depend on dc-agency being ready.  dc-agency agent creation does
+    # require the OIDC token endpoint (via the gateway route resolved above), but
+    # not healthy pod readiness.  Running init.py here means:
+    #   - any provisioning failure aborts before we waste time waiting for pods
+    #   - ConfigMaps are ready to mount the moment we deploy the web-app pods
     echo "Running init.py to initialize the environment..."
+    echo "(This step creates dc-agency agents, provisions IBM Verify objects, and writes ConfigMap env files.)"
+    echo "(Expect several API calls — it may take 30–90 seconds to complete.)"
 
     # Set ADMIN_NAME and ADMIN_PASSWORD based on selected tenant
     if [[ "$tenant" == "0" ]]; then
@@ -618,50 +622,62 @@ deploy_web_apps()
         admin_password="$tenant1_admin_secret"
     fi
 
-    # Capture init.py output and check for errors
-    init_output=$(DMV_HOST=https://$DMV_HOST \
-    BANK_HOST=https://$BANK_HOST \
-    AGENCY_URL=$agency_url \
-    VICAL_BASE_URL=$agency_url \
-    OIDC_TOKEN_ENDPOINT=$oidc_token_endpoint \
-    IDP_URL=$idp_url \
-    IDP_CLIENT_ID=$idp_client_id \
-    IDP_CLIENT_SECRET=$idp_client_secret \
-    ADMIN_NAME=$admin_name \
-    ADMIN_PASSWORD=$admin_password \
-    python3 init.py 2>&1)
-    init_exit_code=$?
+    # OpenShift-only extras are exported into the environment so run_init_py
+    # inherits them automatically via the python3 subprocess.
+    # DMV_HOST / BANK_HOST / HR_HOST are bare hostnames from the route; prefix https://.
+    # Use local variables so re-running deploy_web_apps (or running it after
+    # deploy_dc_agency) never double-prefixes an already-https:// value.
+    local _dmv_host_url _bank_host_url _hr_host_url
+    if [[ "$DMV_HOST"  != https://* ]]; then _dmv_host_url="https://$DMV_HOST";   else _dmv_host_url="$DMV_HOST";  fi
+    if [[ "$BANK_HOST" != https://* ]]; then _bank_host_url="https://$BANK_HOST"; else _bank_host_url="$BANK_HOST"; fi
+    if [[ "$HR_HOST"   != https://* ]]; then _hr_host_url="https://$HR_HOST";     else _hr_host_url="$HR_HOST";    fi
+    export DMV_HOST="$_dmv_host_url"
+    export BANK_HOST="$_bank_host_url"
+    export HR_HOST="$_hr_host_url"
+    export VERIFY_CREDS_FILE="$(pwd)/.verify-creds.json"
+    export PROJECT_NAME="$project_name"
+    export ADMIN_NAME="$admin_name"
+    export ADMIN_PASSWORD="$admin_password"
+    export is_app_prod_deploy="true"
 
-    # Display the output
-    echo "$init_output"
+    # run_init_py handles log capture, Error> grep, and exit-code checking internally.
+    # It will call exit 1 on any failure — no post-call checks needed here.
+    run_init_py
 
-    # Check for specific error patterns
-    if echo "$init_output" | grep -q "Error getting agents:"; then
-        echo "Deployment aborted: Failed to get agents from the agency."
-        exit 1
+    # Check if per-app .env files were created successfully
+    check_env_files_exist
+
+    echo "Creating web-app TLS Secret..."
+    kubectl create secret tls oid4vc-webapps-tls \
+        --cert=./dc-agency/docker/webapps.crt \
+        --key=./dc-agency/docker/webapps.key \
+        --dry-run=client -o yaml | kubectl apply -f -
+
+    echo "Creating per-app ConfigMaps..."
+    kubectl create configmap $bank_config_map_name --from-env-file=.env.bank --dry-run=client -o yaml | kubectl apply -f -
+    kubectl create configmap $dmv_config_map_name  --from-env-file=.env.dmv  --dry-run=client -o yaml | kubectl apply -f -
+    kubectl create configmap $hr_config_map_name   --from-env-file=.env.hr   --dry-run=client -o yaml | kubectl apply -f -
+
+    # ConfigMaps are ready — now wait for dc-agency pods before launching web-app pods
+    # that depend on them at startup.
+    if [[ "$dc_agency_only" != "true" ]]; then
+        echo "Checking if DC agency services are healthy before deploying web-app pods..."
+        check_service_health "iviadcop" 12
+        local iviadcop_status=$?
+        check_service_health "iviadc" 12
+        local iviadc_status=$?
+        if [ $iviadcop_status -ne 0 ] || [ $iviadc_status -ne 0 ]; then
+            echo "Warning: DC Agency services are not fully healthy yet."
+            read -r -p "Continue deploying web-app pods anyway? (y/n): " response
+            if [[ "$response" != "y" ]]; then
+                echo "Deployment aborted."
+                exit 1
+            fi
+            echo "Continuing despite unhealthy DC Agency services..."
+        else
+            echo "DC Agency services are healthy. Deploying web-app pods..."
+        fi
     fi
-
-    if echo "$init_output" | grep -q "Error> failed to create DMV agent"; then
-        echo "Deployment aborted: Failed to create DMV agent."
-        exit 1
-    fi
-
-    if echo "$init_output" | grep -q "Error> failed to create Bank agent"; then
-        echo "Deployment aborted: Failed to create Bank agent."
-        exit 1
-    fi
-
-    # Check exit code
-    if [ $init_exit_code -ne 0 ]; then
-        echo "Deployment aborted: init.py failed with exit code $init_exit_code"
-        exit 1
-    fi
-
-    # Check if .env file was created successfully
-    check_env_file
-
-    echo "Creating ConfigMap: $config_map_name..."
-    kubectl create configmap $config_map_name --from-env-file=.env
 
     # Update the deployment YAML files with the registry information
     echo "Updating deployment YAML files with registry information..."
@@ -670,11 +686,14 @@ deploy_web_apps()
                 "image: bank-app:latest" "image: $registry_url/$registry_namespace/bank-app$suffix:latest"
     replace_string $temp/dmv-app.yaml \
                 "image: dmv-app:latest" "image: $registry_url/$registry_namespace/dmv-app$suffix:latest"
+    replace_string $temp/hr-portal.yaml \
+                "image: hr-portal:latest" "image: $registry_url/$registry_namespace/hr-portal$suffix:latest"
 
     # Deploy the apps
-    echo "Deploying bank-app and dmv-app..."
+    echo "Deploying bank-app, dmv-app and hr-portal..."
     kubectl apply -f $temp/bank-app.yaml
     kubectl apply -f $temp/dmv-app.yaml
+    kubectl apply -f $temp/hr-portal.yaml
     rm -rf $temp/*
 
     # Switch back to original project if needed
@@ -684,8 +703,11 @@ deploy_web_apps()
 
     echo "Web apps deployment completed successfully. It can take a few minutes before the webpages are accessible:"
     echo ""
-    echo "Bank App URL: https://$BANK_HOST"
-    echo "DMV App URL: https://$DMV_HOST"
+    echo "Bank App URL: $BANK_HOST"
+    echo "DMV App URL: $DMV_HOST"
+    echo "HR Portal URL: $HR_HOST"
+
+    save_state
 }
 
 ###############################################################################
@@ -695,50 +717,68 @@ undeploy_web_apps()
 {
     echo "Undeploying OID4VC sample web-apps from OpenShift..."
 
-    # Handle project switching if project_name is provided
+    # ── Step 1: IBM Verify teardown (always runs — independent of cluster state) ──
+    # Provisioned apps, FIDO2 RPs, and the bank group live in the Verify SaaS tenant,
+    # not in OpenShift.  We must clean them up even if the OC project is already gone.
+    echo ""
+    echo "IBM Verify bootstrap credentials are required to clean up provisioned objects"
+    echo "(applications, FIDO2 relying parties, and bank group)."
+    prompt_for_undeploy_verify_credentials
+
+    teardown_verify_objects
+    local teardown_exit=$?
+    if [[ $teardown_exit -ne 0 ]]; then
+        echo "Error: IBM Verify teardown failed (exit $teardown_exit). Aborting undeploy."
+        echo "Fix the teardown errors and retry, or clean up IBM Verify objects manually."
+        return 1
+    fi
+
+    # ── Step 2: OpenShift resource deletion (skipped gracefully if project gone) ──
     local original_project_name=""
-    
+    local skip_kube=false
+
     if [[ -n "$project_name" ]]; then
-        # Get the current project name
         original_project_name=$(oc project -q)
         if [ -z "$original_project_name" ]; then
             original_project_name="default"
         fi
-        
-        # Check if project exists before proceeding
+
         if ! project_exists "$project_name"; then
-            echo "Error: Project '$project_name' does not exist."
-            echo "Aborting undeploy operation - nothing will be deleted."
-            return 1
+            echo "Note: OpenShift project '$project_name' no longer exists — skipping kubectl deletions."
+            skip_kube=true
+        else
+            switch_to_project "$project_name" || return 1
         fi
-        
-        # Switch to the specified project
-        switch_to_project "$project_name" || return 1
     fi
 
-    # Check if resources exist before attempting to delete them
-    echo "Checking for web app resources..."
-    
-    # Delete the custom network policy
-    echo "Deleting network policy..."
-    kubectl delete -f ./openshift/network-policy.yaml || echo "Network policy not found or could not be deleted."
+    if [[ "$skip_kube" == false ]]; then
+        # Delete the custom network policy
+        echo "Deleting network policy..."
+        kubectl delete -f ./openshift/network-policy.yaml || echo "Network policy not found or could not be deleted."
 
-    # Delete the apps
-    echo "Deleting bank-app and dmv-app..."
-    kubectl delete -f ./openshift/bank-app.yaml || echo "Bank app not found or could not be deleted."
-    kubectl delete -f ./openshift/dmv-app.yaml || echo "DMV app not found or could not be deleted."
+        # Delete the apps
+        echo "Deleting bank-app, dmv-app and hr-portal..."
+        kubectl delete -f ./openshift/bank-app.yaml || echo "Bank app not found or could not be deleted."
+        kubectl delete -f ./openshift/dmv-app.yaml || echo "DMV app not found or could not be deleted."
+        kubectl delete -f ./openshift/hr-portal.yaml || echo "HR portal not found or could not be deleted."
 
-    # Delete the routes
-    echo "Deleting routes..."
-    kubectl delete -f ./openshift/routes.yaml || echo "Routes not found or could not be deleted."
+        # Delete the routes
+        echo "Deleting routes..."
+        kubectl delete -f ./openshift/routes.yaml || echo "Routes not found or could not be deleted."
 
-    # Delete the ConfigMap
-    echo "Deleting ConfigMap: $config_map_name..."
-    kubectl delete configmap $config_map_name || echo "ConfigMap not found or could not be deleted."
+        # Delete per-app ConfigMaps
+        echo "Deleting web-app TLS Secret..."
+        kubectl delete secret oid4vc-webapps-tls || echo "Secret oid4vc-webapps-tls not found or could not be deleted."
 
-    # Switch back to original project if needed
-    if [[ -n "$project_name" && -n "$original_project_name" ]]; then
-        switch_back_to_original_project "$original_project_name"
+        echo "Deleting per-app ConfigMaps..."
+        kubectl delete configmap $bank_config_map_name || echo "ConfigMap $bank_config_map_name not found or could not be deleted."
+        kubectl delete configmap $dmv_config_map_name  || echo "ConfigMap $dmv_config_map_name not found or could not be deleted."
+        kubectl delete configmap $hr_config_map_name   || echo "ConfigMap $hr_config_map_name not found or could not be deleted."
+
+        # Switch back to original project if needed
+        if [[ -n "$project_name" && -n "$original_project_name" ]]; then
+            switch_back_to_original_project "$original_project_name"
+        fi
     fi
 
     echo "Web apps undeployment completed."
@@ -759,8 +799,12 @@ deploy_dc_agency()
     local original_project_name=""
     
     if [[ -n "$project_name" ]]; then
-        # Project name was specified
-        suffix="-$project_name"
+        # Project name was specified; omit suffix for "prod" so hostnames are undecorated
+        if [[ "$project_name" == "prod" ]]; then
+            suffix=""
+        else
+            suffix="-$project_name"
+        fi
         
         # Get the current project name
         original_project_name=$(oc project -q)
@@ -829,6 +873,41 @@ deploy_dc_agency()
     if [ -z "$host" ] ; then
         set -e; host=`get_host $route "host"`; set +e
     fi
+
+    cp ./openshift/routes.yaml $temp/
+    if [[ -n "$apps_domain" ]]; then
+        replace_string $temp/routes.yaml "host: dmv-dc.example.com" "host: dmv-dc$suffix.$apps_domain"
+        replace_string $temp/routes.yaml "host: bank-dc.example.com" "host: bank-dc$suffix.$apps_domain"
+        replace_string $temp/routes.yaml "host: hr-dc.example.com" "host: hr-dc$suffix.$apps_domain"
+    else
+        sed '/host:/d' $temp/routes.yaml > $temp/routes.yaml.tmp
+        mv $temp/routes.yaml.tmp $temp/routes.yaml
+    fi
+    kubectl apply -f $temp/routes.yaml
+    rm -rf $temp/*
+
+    set -e; dmv_route_host=`get_host $dmv_app_name`; set +e
+    set -e; bank_route_host=`get_host $bank_app_name`; set +e
+    set -e; hr_route_host=`get_host $hr_app_name`; set +e
+
+    echo "Pre-provisioning IBM Verify apps for gateway OIDC..."
+    DMV_HOST="https://$dmv_route_host" \
+    BANK_HOST="https://$bank_route_host" \
+    HR_HOST="https://$hr_route_host" \
+    GATEWAY_HOST="$host" \
+    VERIFY_CREDS_FILE="$(pwd)/.verify-creds.json" \
+    DMV_IBM_VERIFY_BASE_URL="$dmv_verify_base_url" \
+    DMV_IBM_VERIFY_BOOTSTRAP_CLIENT_ID="$dmv_verify_bootstrap_client_id" \
+    DMV_IBM_VERIFY_BOOTSTRAP_CLIENT_SECRET="$dmv_verify_bootstrap_client_secret" \
+    HR_IBM_VERIFY_BASE_URL="$hr_verify_base_url" \
+    HR_IBM_VERIFY_BOOTSTRAP_CLIENT_ID="$hr_verify_bootstrap_client_id" \
+    HR_IBM_VERIFY_BOOTSTRAP_CLIENT_SECRET="$hr_verify_bootstrap_client_secret" \
+    BANK_IBM_VERIFY_BASE_URL="$bank_verify_base_url" \
+    BANK_IBM_VERIFY_BOOTSTRAP_CLIENT_ID="$bank_verify_bootstrap_client_id" \
+    BANK_IBM_VERIFY_BOOTSTRAP_CLIENT_SECRET="$bank_verify_bootstrap_client_secret" \
+    PROJECT_NAME="$project_name" \
+    VERIFY_SETUP_DEBUG="$verify_setup_debug" \
+    python3 -u verify_preprovision.py || exit 1
 
     # Update gateway certificate config using the hostname and
     # regenerate new certificates
@@ -913,16 +992,14 @@ deploy_dc_agency()
     cp -r ./dc-agency/docker/iag_config/* $temp/
     cp ./dc-agency/docker/iviadc-ca.pem $temp/
     rm -f $temp/certs.sh $temp/req.conf $temp/ivjwt_req.conf
-    
-    # Use provided idp_client_id and idp_client_secret
-    idp_client_id_value="$idp_client_id"
-    idp_client_secret_value="$idp_client_secret"
-    
-    # Enable oidc idp in identity section of iag config
-    switch_iag_to_oidc $temp/config.yaml
-    replace_string $temp/config.yaml "discovery_endpoint: \"https://example.idp/oauth2/.well-known/openid-configuration\"" "discovery_endpoint: \"$idp_url/oauth2/.well-known/openid-configuration\""
-    replace_string $temp/config.yaml "client_id: \"client_id\"" "client_id: \"$idp_client_id_value\""
-    replace_string $temp/config.yaml "client_secret: \"client_secret\"" "client_secret: \"$idp_client_secret_value\""
+    if [[ -f .verify-creds.json ]]; then
+        dmv_oidc_client_id=$(python3 -c 'import json; import sys; print(json.load(open(".verify-creds.json"))["dmv"]["oidc_client_id"])')
+        dmv_oidc_client_secret=$(python3 -c 'import json; import sys; print(json.load(open(".verify-creds.json"))["dmv"]["oidc_client_secret"])')
+        switch_iag_to_oidc $temp/config.yaml
+        replace_string $temp/config.yaml "discovery_endpoint: \"https://example.idp/oauth2/.well-known/openid-configuration\"" "discovery_endpoint: \"$dmv_verify_base_url/oauth2/.well-known/openid-configuration\""
+        replace_string $temp/config.yaml "client_id: \"client_id\"" "client_id: \"$dmv_oidc_client_id\""
+        replace_string $temp/config.yaml "client_secret: \"client_secret\"" "client_secret: \"$dmv_oidc_client_secret\""
+    fi
     kubectl create configmap $gw_configmap --from-file=$temp/
     rm -rf $temp/*
 
@@ -949,7 +1026,7 @@ deploy_dc_agency()
     echo "Checking if DC agency services are fully healthy..."
     
     # Check if DC agency services are fully healthy
-    check_dc_agency_services 20  # Try for up to 5 minutes (20 attempts with 15-second intervals)
+    check_dc_agency_services 60  # Try for up to 5 minutes (60 attempts with 5-second intervals)
     local services_status=$?
     
     if [ $services_status -eq 0 ]; then
@@ -978,49 +1055,46 @@ undeploy_dc_agency()
     echo "You need to be logged in to OC for this command to succeed!"
     echo ""
 
-    # Handle project switching if project_name is provided
     local original_project_name=""
-    
+    local skip_kube=false
+
     if [[ -n "$project_name" ]]; then
-        # Get the current project name
         original_project_name=$(oc project -q)
         if [ -z "$original_project_name" ]; then
             original_project_name="default"
         fi
-        
-        # Check if project exists before proceeding
+
         if ! project_exists "$project_name"; then
-            echo "Error: Project '$project_name' does not exist."
-            echo "Aborting undeploy operation - nothing will be deleted."
-            return 1
+            echo "Note: OpenShift project '$project_name' no longer exists — skipping kubectl deletions."
+            skip_kube=true
+        else
+            switch_to_project "$project_name" || return 1
         fi
-        
-        # Switch to the specified project
-        switch_to_project "$project_name" || return 1
     fi
 
-    # Check if resources exist before attempting to delete them
-    echo "Checking for dc-agency resources..."
+    if [[ "$skip_kube" == false ]]; then
+        echo "Checking for dc-agency resources..."
 
-    # Delete the pods
-    echo "Deleting the pods...."
-    kubectl delete -f dc-agency/openshift/ || echo "DC agency pods not found or could not be deleted."
+        # Delete the pods
+        echo "Deleting the pods...."
+        kubectl delete -f dc-agency/openshift/ || echo "DC agency pods not found or could not be deleted."
 
-    # Delete the ConfigMaps
-    echo "Deleting the ConfigMap's...."
-    kubectl delete configmap $pg_configmap || echo "ConfigMap $pg_configmap not found or could not be deleted."
-    kubectl delete configmap $op_configmap || echo "ConfigMap $op_configmap not found or could not be deleted."
-    kubectl delete configmap $vc_configmap || echo "ConfigMap $vc_configmap not found or could not be deleted."
-    kubectl delete configmap $gw_configmap || echo "ConfigMap $gw_configmap not found or could not be deleted."
-    kubectl delete configmap $ca_configmap || echo "ConfigMap $ca_configmap not found or could not be deleted."
+        # Delete the ConfigMaps
+        echo "Deleting the ConfigMap's...."
+        kubectl delete configmap $pg_configmap || echo "ConfigMap $pg_configmap not found or could not be deleted."
+        kubectl delete configmap $op_configmap || echo "ConfigMap $op_configmap not found or could not be deleted."
+        kubectl delete configmap $vc_configmap || echo "ConfigMap $vc_configmap not found or could not be deleted."
+        kubectl delete configmap $gw_configmap || echo "ConfigMap $gw_configmap not found or could not be deleted."
+        kubectl delete configmap $ca_configmap || echo "ConfigMap $ca_configmap not found or could not be deleted."
 
-    # Delete the service account
-    echo "Deleting the service account: $vc_accountname...."
-    kubectl delete serviceaccount $vc_accountname || echo "Service account $vc_accountname not found or could not be deleted."
+        # Delete the service account
+        echo "Deleting the service account: $vc_accountname...."
+        kubectl delete serviceaccount $vc_accountname || echo "Service account $vc_accountname not found or could not be deleted."
 
-    # Switch back to original project if needed
-    if [[ -n "$project_name" && -n "$original_project_name" ]]; then
-        switch_back_to_original_project "$original_project_name"
+        # Switch back to original project if needed
+        if [[ -n "$project_name" && -n "$original_project_name" ]]; then
+            switch_back_to_original_project "$original_project_name"
+        fi
     fi
 
     echo "DC Agency services undeployment completed."
@@ -1028,7 +1102,7 @@ undeploy_dc_agency()
     # Add warning about web apps needing redeployment only when undeploying dc-agency only
     if [[ "$dc_agency_only" == "true" ]]; then
         echo ""
-        echo "⚠️  WARNING: If you have web applications (bank-app, dmv-app) currently deployed,"
+        echo "⚠️  WARNING: If you have web applications (bank-app, dmv-app, hr-portal) currently deployed,"
         echo "   you will need to redeploy them to ensure they are properly configured"
         echo "   with the new DC agency services when you start them again."
         echo ""
@@ -1066,9 +1140,16 @@ create_secret()
 command="deploy"
 web_apps_only=false
 dc_agency_only=false
-idp_url=""
-idp_client_id=""
-idp_client_secret=""
+dmv_verify_base_url=""
+dmv_verify_bootstrap_client_id=""
+dmv_verify_bootstrap_client_secret=""
+hr_verify_base_url=""
+hr_verify_bootstrap_client_id=""
+hr_verify_bootstrap_client_secret=""
+bank_verify_base_url=""
+bank_verify_bootstrap_client_id=""
+bank_verify_bootstrap_client_secret=""
+verify_setup_debug="false"
 apps_domain=""
 project_name=""
 registry_url=""
@@ -1101,20 +1182,48 @@ while [[ $# -gt 0 ]]; do
             dc_agency_only=true
             shift
             ;;
+        --debug)
+            verify_setup_debug="true"
+            shift
+            ;;
         --tenant)
             tenant="$2"
             shift 2
             ;;
-        --idp-url)
-            idp_url="$2"
+        --dmv-verify-base-url)
+            dmv_verify_base_url="$2"
             shift 2
             ;;
-        --idp-client-id)
-            idp_client_id="$2"
+        --dmv-verify-bootstrap-client-id)
+            dmv_verify_bootstrap_client_id="$2"
             shift 2
             ;;
-        --idp-client-secret)
-            idp_client_secret="$2"
+        --dmv-verify-bootstrap-client-secret)
+            dmv_verify_bootstrap_client_secret="$2"
+            shift 2
+            ;;
+        --hr-verify-base-url)
+            hr_verify_base_url="$2"
+            shift 2
+            ;;
+        --hr-verify-bootstrap-client-id)
+            hr_verify_bootstrap_client_id="$2"
+            shift 2
+            ;;
+        --hr-verify-bootstrap-client-secret)
+            hr_verify_bootstrap_client_secret="$2"
+            shift 2
+            ;;
+        --bank-verify-base-url)
+            bank_verify_base_url="$2"
+            shift 2
+            ;;
+        --bank-verify-bootstrap-client-id)
+            bank_verify_bootstrap_client_id="$2"
+            shift 2
+            ;;
+        --bank-verify-bootstrap-client-secret)
+            bank_verify_bootstrap_client_secret="$2"
             shift 2
             ;;
         --apps-domain)
@@ -1145,10 +1254,25 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# Enforce mandatory project name for all commands
+if [[ -z "$project_name" ]]; then
+    echo "Error: <oc-project-name> is required."
+    usage
+fi
+
 # Validate options
 if [[ "$web_apps_only" == true && "$dc_agency_only" == true ]]; then
     echo "Error: Cannot specify both --web-apps-only and --dc-agency-only"
     usage
+fi
+
+# Check OpenShift login status before prompting for any details.
+# build and push are pure Docker operations and do not need a cluster connection.
+if [[ "$command" != "build" && "$command" != "push" ]]; then
+    if ! oc whoami &>/dev/null; then
+        echo "Error: You are not logged in to OpenShift. Please run 'oc login' first."
+        exit 1
+    fi
 fi
 
 # Validate registry parameters for build, push, deploy, and create-secret commands
@@ -1238,5 +1362,3 @@ esac
 
 
 echo "Operation completed successfully."
-
-# Made with Bob

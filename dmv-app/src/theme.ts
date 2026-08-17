@@ -5,6 +5,7 @@ const colors = {
     // Primary Colors
     navyBlue: '#0A1033',
     royalBlue: '#1A46E5',
+    dmvRed: '#BB162D',
     white: '#FFFFFF',
 
     // Secondary Colors
@@ -22,9 +23,9 @@ const theme = createTheme({
     palette: {
         mode: 'light',
         primary: {
-            main: colors.royalBlue,
-            dark: colors.navyBlue,
-            light: colors.lightBlue,
+            main: colors.dmvRed,
+            dark: '#8C0F20',
+            light: '#D94056',
             contrastText: colors.white,
         },
         secondary: {
@@ -121,7 +122,7 @@ const theme = createTheme({
         MuiAppBar: {
             styleOverrides: {
                 root: {
-                    backgroundColor: colors.navyBlue,
+                    backgroundColor: colors.dmvRed,
                 },
             },
         },

@@ -1,5 +1,5 @@
 import React from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router';
 import stockMarketImage from '../images/stock-market.png';
 import testimonialImage from '../images/testimonial.png';
 import bankingImage from '../images/banking.png';

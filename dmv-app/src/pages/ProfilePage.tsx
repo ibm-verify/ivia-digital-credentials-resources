@@ -26,8 +26,16 @@ import { Copy } from '@carbon/icons-react';
 import vciCredentialService from '../services/VciCredentialService';
 import { useAuth } from '../components/AuthProvider';
 import { UserProfile } from '@carbon/icons-react';
+import PasskeyRegistration from '../components/PasskeyRegistration';
+import PasskeyList from '../components/PasskeyList';
 
 // Define a type for our user profile data
+interface DrivingPrivilege {
+  vehicle_category_code: string;
+  issue_date: string;
+  expiry_date: string;
+}
+
 interface UserProfile {
   id: string;
   firstName: string;
@@ -61,9 +69,7 @@ interface UserProfile {
   unDistinguishingSign: string;
   issuingAuthority: string;
   issuingJurisdiction: string;
-  drivingPrivileges: Array<string>;
-  privilegeIssueDate: string;
-  privilegeExpiryDate: string;
+  drivingPrivileges: Array<DrivingPrivilege>;
 }
 
 const ProfilePage: React.FC = () => {
@@ -75,6 +81,7 @@ const ProfilePage: React.FC = () => {
   const [dialogTitle, setDialogTitle] = useState<string>('');
   const [dialogData, setDialogData] = useState<ReactNode | Blob | null>(null);
   const [isPageLoading, setIsPageLoading] = useState<boolean>(true);
+  const [passkeyRefreshTrigger, setPasskeyRefreshTrigger] = useState(0);
 
   const today: Date = new Date();
   const dateOneYearFromToday: Date = new Date(today);
@@ -114,9 +121,10 @@ const ProfilePage: React.FC = () => {
     unDistinguishingSign: 'AU',
     issuingAuthority: 'Department of Motor Vehicles',
     issuingJurisdiction: 'Main Roads Australia',
-    drivingPrivileges: ['C. Car ', 'RE. Motorbike Restricted'],
-    privilegeIssueDate: today.toJSON().slice(0, 10),
-    privilegeExpiryDate: dateOneYearFromToday.toJSON().slice(0, 10)
+    drivingPrivileges: [
+      { vehicle_category_code: 'C', issue_date: today.toJSON().slice(0, 10), expiry_date: dateOneYearFromToday.toJSON().slice(0, 10) },
+      { vehicle_category_code: 'RE', issue_date: today.toJSON().slice(0, 10), expiry_date: dateOneYearFromToday.toJSON().slice(0, 10) }
+    ]
   });
 
   // Update user profile when auth user changes
@@ -330,8 +338,9 @@ const ProfilePage: React.FC = () => {
                     primary="Driving Privileges"
                     secondary={
                       <>
-                        {userProfile.drivingPrivileges[0]}<br />
-                        {userProfile.drivingPrivileges[1]}
+                        {userProfile.drivingPrivileges.map((p, i) => (
+                          <span key={i}>{p.vehicle_category_code}{i < userProfile.drivingPrivileges.length - 1 && <br />}</span>
+                        ))}
                       </>
                     }
                     secondaryTypographyProps={{ fontSize: '.875rem' }}
@@ -428,16 +437,56 @@ const ProfilePage: React.FC = () => {
               </Grid>
             </Paper>
           </Grid>
+          
+          <Grid size={{ xs: 12, md: 6 }}>
+            <Paper
+              elevation={3}
+              sx={{
+                borderRadius: 4,
+                border: `1px solid ${theme.palette.divider}`,
+                boxShadow: 'none',
+                background: theme.palette.background.paper,
+              }}
+            >
+              <Typography sx={{ mb: 1, p: 3, pb: 0 }} variant="h6" component="h2" gutterBottom color={theme.palette.primary.dark}>
+                Security
+              </Typography>
+              <Typography variant="body1" paragraph sx={{ px: 3 }}>
+                Register a passkey to sign in to your account instead of a password.
+              </Typography>
+              <Grid container spacing={3}>
+                <Grid size={{ xs: 12 }}>
+                  <Divider component="div" />
+                  <List sx={{ p: 0 }}>
+                    <ListItem sx={{}}>
+                      <ListItemText
+                        primary="Passkey Registration"
+                        secondary='Available'
+                        primaryTypographyProps={{ fontWeight: 'bold' }}
+                      />
+                      <PasskeyRegistration onSuccess={() => setPasskeyRefreshTrigger((n: number) => n + 1)} />
+                    </ListItem>
+                    <Divider component="div" />
+                    <ListItem sx={{ flexDirection: 'column', alignItems: 'stretch', py: 0 }}>
+                      <ListItemText
+                        primary="Registered Passkeys"
+                        primaryTypographyProps={{ fontWeight: 'bold' }}
+                        sx={{ pt: 1, px: 0 }}
+                      />
+                      <PasskeyList refreshTrigger={passkeyRefreshTrigger} />
+                    </ListItem>
+                  </List>
+                </Grid>
+              </Grid>
+              
+            </Paper>
+          </Grid>
 
-
-        </Grid >
-        <Grid container>
           {/* Available Services Card */}
           <Grid size={{ xs: 12, md: 6 }}>
             <Paper
               elevation={3}
               sx={{
-                mt: 3,
                 p: 3,
                 borderRadius: 4,
                 boxShadow: 'none',
@@ -461,6 +510,7 @@ const ProfilePage: React.FC = () => {
               </Grid>
             </Paper>
           </Grid>
+          
         </Grid>
       </Container >
       <CustomDialog

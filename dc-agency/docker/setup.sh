@@ -36,6 +36,24 @@ gen_certs oidc_provider_config
 # IAG depends on OIDC
 gen_certs iag_config
 
+# Generate shared web-app cert (used by bank-app, dmv-app, hr-portal for HTTPS)
+echo "Generating web-app TLS certificate..."
+openssl req -new -nodes \
+    -keyout webapps.key \
+    -out    webapps.csr \
+    -config webapps_req.conf
+openssl x509 -req \
+    -in webapps.csr \
+    -CA  iviadc-ca.pem \
+    -CAkey iviadc-ca.key \
+    -CAcreateserial \
+    -out webapps.crt \
+    -days 365 \
+    -extensions v3_req \
+    -extfile webapps_req.conf
+rm -f webapps.csr
+echo "Web-app TLS certificate generated."
+
 # Create CA bundle for Python requests (includes server cert + CA cert)
 # This is needed for proper SSL verification with self-signed certificates
 cat ./iag_config/iviadcgw_pub.crt ./iviadc-ca.pem > ./ca-bundle.pem

@@ -11,7 +11,6 @@ general:
     request_log:
       enabled: false
       format: ":date[iso] :method :url :http-version :status"
-    enable_doc_cache: false
     tls:
       private_key: !file "/var/config/iviadc_priv.key"
       public_key: !file "/var/config/iviadc_pub.crt"

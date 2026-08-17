@@ -1,5 +1,5 @@
 import React from 'react';
-import { Navigate } from 'react-router-dom';
+import { Navigate } from 'react-router';
 import { Header } from './Header';
 import { useAuth } from './AuthProvider';
 import { CircularProgress, Box } from '@mui/material';

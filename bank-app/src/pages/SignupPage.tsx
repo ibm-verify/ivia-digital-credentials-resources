@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router';
 import diagencyApiService from '../services/DiagencyApiService';
 import {
   Container,
@@ -30,6 +30,7 @@ import {
   CheckCircle
 } from '@mui/icons-material';
 import QRCode from 'qrcode';
+import { useAuth } from '../components/AuthProvider';
 
 interface FormData {
   firstName: string;
@@ -48,13 +49,14 @@ interface FormData {
 const SignupPage: React.FC = () => {
   const navigate = useNavigate();
   const theme = useTheme();
+  const { completeVerifiedSignup } = useAuth();
   const [activeStep, setActiveStep] = useState(0);
   const [formData, setFormData] = useState<FormData>({
     firstName: '',
     lastName: '',
     email: '',
     phone: '',
-    accountType: 'checking',
+    accountType: 'savings',
     address: '',
     city: '',
     state: '',
@@ -63,7 +65,9 @@ const SignupPage: React.FC = () => {
     birthDate: '',
   });
   const [isVerifying, setIsVerifying] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [verificationError, setVerificationError] = useState('');
+  const [signupError, setSignupError] = useState('');
   const [verificationSuccess, setVerificationSuccess] = useState(false);
   interface VerificationRequest {
     qr: string;
@@ -77,6 +81,7 @@ const SignupPage: React.FC = () => {
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { id, value } = e.target;
     setFormData({ ...formData, [id]: value });
+    setSignupError('');
   };
 
   const handleNextStep = () => {
@@ -304,20 +309,36 @@ const SignupPage: React.FC = () => {
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     // Only allow navigation to success page if verification was successful
-    if (verificationSuccess) {
-      navigate('/success', {
-        state: {
-          formData,
-          verificationCompleted: true
-        }
-      });
-    } else {
+    if (!verificationSuccess) {
       // Show error if user tries to submit without verification
       setVerificationError('Please complete identity verification before submitting.');
       setActiveStep(0); // Go back to verification step
+      return;
+    }
+
+    setIsSubmitting(true);
+    setSignupError('');
+
+    try {
+      const signupResult = await diagencyApiService.unauthenticatedRequest<{
+        userInfo: Record<string, unknown>;
+      }>('/api/signup', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: formData
+      });
+
+      completeVerifiedSignup(signupResult.userInfo);
+      navigate('/profile', { replace: true });
+    } catch (error: any) {
+      setSignupError(`Signup failed: ${error.message || 'Please try again.'}`);
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -519,6 +540,12 @@ const SignupPage: React.FC = () => {
       description: 'Choose account type and contact information',
       content: (
         <Box sx={{ mt: 4 }} component="form" onSubmit={handleSubmit}>
+          {signupError && (
+            <Alert severity="error" sx={{ mb: 3 }}>
+              {signupError}
+            </Alert>
+          )}
+
           <Grid container spacing={3}>
             <Grid size={{ xs: 12, md: 6 }}>
               <TextField
@@ -574,8 +601,10 @@ const SignupPage: React.FC = () => {
               variant="contained"
               color="primary"
               size="large"
+              disabled={isSubmitting}
+              startIcon={isSubmitting ? <CircularProgress size={20} /> : undefined}
             >
-              Complete Application
+              {isSubmitting ? 'Creating Account...' : 'Complete Application'}
             </Button>
           </Box>
         </Box>
@@ -587,10 +616,10 @@ const SignupPage: React.FC = () => {
     <Container maxWidth="md" sx={{ py: 4 }}>
       <Box sx={{ mb: 6, textAlign: 'center' }}>
         <Typography variant="h3" component="h1" gutterBottom fontWeight="bold">
-          Open an Account
+          Open a Savings Account
         </Typography>
         <Typography variant="subtitle1" color="text.secondary">
-          Complete the form below to open a new account with Smart Money Bank.
+          Complete the form below to open a new savings account with Smart Money Bank.
         </Typography>
       </Box>
 

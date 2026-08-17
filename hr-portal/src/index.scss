@@ -1,0 +1,31 @@
+:root {
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  background:
+    radial-gradient(circle at top left, rgba(181, 106, 45, 0.16), transparent 32%),
+    radial-gradient(circle at bottom right, rgba(18, 59, 56, 0.16), transparent 28%),
+    #f6f0e7;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+.app-title {
+  font-family: 'IBM Plex Sans', 'Segoe UI', sans-serif;
+  font-size: 1.1rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}

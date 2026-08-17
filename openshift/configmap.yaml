@@ -1,30 +1,38 @@
+# NOTE: This file is a static reference only. ConfigMaps are not applied from this file
+# at deploy time. The deploy script creates three per-app ConfigMaps dynamically from
+# their respective env files:
+#   oid4vc-config-bank  (from .env.bank)
+#   oid4vc-config-dmv   (from .env.dmv)
+#   oid4vc-config-hr    (from .env.hr)
+# This file shows an example of the bank-app ConfigMap structure for reference.
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: oid4vc-config
+  name: oid4vc-config-bank
 data:
   ACCOUNT_URL: ""
   REACT_APP_ACCOUNT_URL: ""
-  TOKEN_ENDPOINT: ""
-  DMV_AGENT_NAME: "DMVIssuer"
-  DMV_AGENT_ID: ""
-  REACT_APP_DMV_AGENT_ID: ""
-  REACT_APP_CLIENT_ID: ""
-  REACT_APP_CLIENT_SECRET: ""
-  DMV_AGENT_PASSWORD: ""
-  REACT_APP_DMV_AGENT_PASSWORD: ""
+  REACT_APP_TOKEN_ENDPOINT: ""
   BANK_AGENT_NAME: "BankVerifier"
   BANK_AGENT_ID: ""
   REACT_APP_BANK_AGENT_ID: ""
+  BANK_AGENT_CLIENT_ID: ""
+  REACT_APP_BANK_AGENT_CLIENT_ID: ""
   BANK_AGENT_PASSWORD: ""
   REACT_APP_BANK_AGENT_PASSWORD: ""
-  CREDENTIAL_SCHEMA_ID: ""
-  REACT_APP_CREDENTIAL_SCHEMA_ID: ""
-  CREDENTIAL_DEFINITION_ID: ""
-  REACT_APP_CREDENTIAL_DEFINITION_ID: ""
   EXCHANGE_TEMPLATE_ID: ""
   REACT_APP_EXCHANGE_TEMPLATE_ID: ""
-  W3_ROOT: ""
-  REACT_APP_W3_ROOT: ""
-
-# Made with Bob
+  HR_EXCHANGE_TEMPLATE_ID: ""
+  REACT_APP_HR_EXCHANGE_TEMPLATE_ID: ""
+  REACT_APP_BANK_W3_ROOT: ""
+  REACT_APP_BANK_CLIENT_ID: ""
+  REACT_APP_BANK_CLIENT_SECRET: ""
+  REACT_APP_BANK_REDIRECT_URL: ""
+  REACT_APP_BANK_LOGOUT_REDIRECT_URL: ""
+  IBM_VERIFY_BASE_URL: ""
+  IBM_VERIFY_TOKEN_URL: ""
+  IBM_VERIFY_CLIENT_ID: ""
+  IBM_VERIFY_CLIENT_SECRET: ""
+  IBM_VERIFY_BANK_USERS_GROUP: ""
+  PROJECT_NAME: ""
+  IBM_VERIFY_FIDO2_RELYING_PARTY_ID: ""

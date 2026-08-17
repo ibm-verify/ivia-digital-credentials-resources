@@ -1,5 +1,6 @@
 import { User } from "oidc-client-ts";
 import React, { createContext, useContext, useState, useEffect } from "react";
+import { startRegistration, startAuthentication } from "@simplewebauthn/browser";
 
 export interface AuthState {
   isLoading: boolean;
@@ -16,10 +17,20 @@ export interface AuthContextProps {
   login: () => Promise<void>;
   logout: () => Promise<void>;
   loginCallback: () => Promise<User | null>;
+  loginWithPasskey: () => Promise<User | null>;
+  registerPasskey: (nickname?: string) => Promise<void>;
 }
 
 export const AuthContext = createContext<AuthContextProps | undefined>(undefined);
 AuthContext.displayName = "AuthContext";
+
+const clearAuthStorage = () => {
+  sessionStorage.removeItem('auth_state');
+  sessionStorage.removeItem('auth_nonce');
+  Object.keys(sessionStorage)
+    .filter(key => key.startsWith('oidc.'))
+    .forEach(key => sessionStorage.removeItem(key));
+};
 
 interface AuthProviderProps {
   children: React.ReactNode;
@@ -94,25 +105,32 @@ export const AuthProvider = ({ children }: AuthProviderProps): React.ReactNode =
     try {
       // Logout based on session cookie state
       // Call server-side logout endpoint
-      await fetch('/auth/logout', {
+      const response = await fetch('/auth/logout', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({})
       });
+
+      const data = response.ok ? await response.json() : {};
       
-      // Reset authentication state
+      // Clear session storage
+      clearAuthStorage();
+
+      if (data.logoutUrl) {
+        window.location.replace(data.logoutUrl);
+        return;
+      }
+
+      // No provider logout URL means we can only finish local logout.
       setState({
         isLoading: false,
         isAuthenticated: false,
         user: null,
         tokenExchangeCompleted: false
       });
-      
-      // Clear session storage
-      sessionStorage.removeItem('auth_state');
-      sessionStorage.removeItem('auth_nonce');
+      window.location.replace('/login');
       
     } catch (error: any) {
       // If logout fails, still ensure we're logged out locally
@@ -122,8 +140,9 @@ export const AuthProvider = ({ children }: AuthProviderProps): React.ReactNode =
         user: null,
         tokenExchangeCompleted: false
       });
-      
-      throw error;
+
+      clearAuthStorage();
+      window.location.assign('/login');
     }
   };
   
@@ -191,6 +210,64 @@ export const AuthProvider = ({ children }: AuthProviderProps): React.ReactNode =
     }
   };
   
+  const loginWithPasskey = async (): Promise<User | null> => {
+    setState(prev => ({ ...prev, isLoading: true, tokenExchangeCompleted: false }));
+    try {
+      const optionsRes = await fetch('/auth/passkey/login/options', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({})
+      });
+      if (!optionsRes.ok) throw new Error('Failed to get passkey authentication options');
+      const options = await optionsRes.json();
+
+      const credential = await startAuthentication({ optionsJSON: options });
+
+      const completeRes = await fetch('/auth/passkey/login/complete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ credential })
+      });
+      if (!completeRes.ok) throw new Error('Passkey authentication failed');
+      const data = await completeRes.json();
+
+      const user = new User({
+        access_token: 'dummy',
+        token_type: 'Bearer',
+        scope: 'openid',
+        profile: data.userInfo
+      });
+
+      setState({ isLoading: false, isAuthenticated: true, user, tokenExchangeCompleted: true });
+      return user;
+    } catch (err) {
+      setState(prev => ({ ...prev, isLoading: false }));
+      throw err;
+    }
+  };
+
+  const registerPasskey = async (nickname?: string): Promise<void> => {
+    const optionsRes = await fetch('/auth/passkey/register/options', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({})
+    });
+    if (!optionsRes.ok) throw new Error('Failed to get passkey registration options');
+    const options = await optionsRes.json();
+
+    const credential = await startRegistration({ optionsJSON: options });
+
+    const completeRes = await fetch('/auth/passkey/register/complete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ credential, nickname: nickname || 'My Passkey' })
+    });
+    if (!completeRes.ok) {
+      const err = await completeRes.json().catch(() => ({}));
+      throw new Error(err.details || 'Failed to register passkey');
+    }
+  };
+
   const contextValue = React.useMemo(() => ({
     isLoading: state.isLoading,
     isAuthenticated: state.isAuthenticated,
@@ -198,7 +275,9 @@ export const AuthProvider = ({ children }: AuthProviderProps): React.ReactNode =
     tokenExchangeCompleted: state.tokenExchangeCompleted,
     login,
     logout,
-    loginCallback
+    loginCallback,
+    loginWithPasskey,
+    registerPasskey
   }), [state.isLoading, state.isAuthenticated, state.user, state.tokenExchangeCompleted]);
   
   return (

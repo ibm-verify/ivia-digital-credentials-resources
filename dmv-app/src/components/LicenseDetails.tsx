@@ -1,6 +1,12 @@
 import { ListItem, ListItemText, Box, List, Divider, Typography } from "@mui/material"
 import Grid from '@mui/material/Grid';
 
+interface DrivingPrivilege {
+  vehicle_category_code: string;
+  issue_date: string;
+  expiry_date: string;
+}
+
 interface UserProfileProps {
   id: string;
   firstName: string;
@@ -34,9 +40,7 @@ interface UserProfileProps {
   unDistinguishingSign: string;
   issuingAuthority: string;
   issuingJurisdiction: string;
-  drivingPrivileges: Array<string>;
-  privilegeIssueDate: string;
-  privilegeExpiryDate: string;
+  drivingPrivileges: Array<DrivingPrivilege>;
 }
 
 export const LicenseDetails = ({ userProfile }: { userProfile: UserProfileProps }) => {
@@ -400,43 +404,41 @@ export const LicenseDetails = ({ userProfile }: { userProfile: UserProfileProps 
                 Driving Privileges
             </Typography>
             <List disablePadding>
-                <ListItem sx={{ p: 0, py: 1 }}>
-                    <ListItemText
-                        primary="Class"
-                        secondary={
-                            <>
-                                {userProfile.drivingPrivileges[0]}<br />
-                                {userProfile.drivingPrivileges[1]}
-                            </>
-                        }
-                        secondaryTypographyProps={{ fontSize: '.875rem' }}
-                        primaryTypographyProps={{ fontWeight: 'bold' }}
-                    />
-                </ListItem>
-                <Divider component="li" />
-                
-                <Grid container>
-                    <Grid size={{ xs: 12, md: 6 }}>
+                {userProfile.drivingPrivileges.map((privilege, index) => (
+                    <Box key={index}>
                         <ListItem sx={{ p: 0, py: 1 }}>
                             <ListItemText
-                                primary="Privilege Issue Date"
-                                secondary={userProfile.privilegeIssueDate}
+                                primary="Vehicle Category Code"
+                                secondary={privilege.vehicle_category_code}
                                 secondaryTypographyProps={{ fontSize: '.875rem' }}
                                 primaryTypographyProps={{ fontWeight: 'bold' }}
                             />
                         </ListItem>
-                    </Grid>
-                    <Grid size={{ xs: 12, md: 6 }}>
-                        <ListItem sx={{ p: 0, py: 1 }}>
-                            <ListItemText
-                                primary="Privilege Expiry Date"
-                                secondary={userProfile.privilegeExpiryDate}
-                                secondaryTypographyProps={{ fontSize: '.875rem' }}
-                                primaryTypographyProps={{ fontWeight: 'bold' }}
-                            />
-                        </ListItem>
-                    </Grid>
-                </Grid>
+                        <Grid container>
+                            <Grid size={{ xs: 12, md: 6 }}>
+                                <ListItem sx={{ p: 0, py: 1 }}>
+                                    <ListItemText
+                                        primary="Issue Date"
+                                        secondary={privilege.issue_date}
+                                        secondaryTypographyProps={{ fontSize: '.875rem' }}
+                                        primaryTypographyProps={{ fontWeight: 'bold' }}
+                                    />
+                                </ListItem>
+                            </Grid>
+                            <Grid size={{ xs: 12, md: 6 }}>
+                                <ListItem sx={{ p: 0, py: 1 }}>
+                                    <ListItemText
+                                        primary="Expiry Date"
+                                        secondary={privilege.expiry_date}
+                                        secondaryTypographyProps={{ fontSize: '.875rem' }}
+                                        primaryTypographyProps={{ fontWeight: 'bold' }}
+                                    />
+                                </ListItem>
+                            </Grid>
+                        </Grid>
+                        {index < userProfile.drivingPrivileges.length - 1 && <Divider component="li" />}
+                    </Box>
+                ))}
             </List>
         </Box>
     )

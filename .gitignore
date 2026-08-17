@@ -2,6 +2,7 @@
 mobile_qr.png
 bank-app/build/*
 dmv-app/build/*
+hr-portal/build/*
 offer_image.png
 .env
 oid4vc-sample-apps.code-workspace
@@ -16,4 +17,10 @@ oid4vc-sample-apps.code-workspace
 !verify_root_pub.crt
 dc-agency/docker/iag_config/req.conf
 dc-agency/docker/config/config.yaml
+holder-session.json
+tests/artifacts/
 venv
+__pycache__
+.deploy-state.*
+.env.*
+.verify-creds.json

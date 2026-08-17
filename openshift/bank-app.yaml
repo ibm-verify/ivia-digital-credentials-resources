@@ -32,48 +32,141 @@ spec:
         - name: ACCOUNT_URL
           valueFrom:
             configMapKeyRef:
-              name: oid4vc-config
+              name: oid4vc-config-bank
               key: ACCOUNT_URL
         - name: REACT_APP_ACCOUNT_URL
           valueFrom:
             configMapKeyRef:
-              name: oid4vc-config
+              name: oid4vc-config-bank
               key: REACT_APP_ACCOUNT_URL
         - name: REACT_APP_TOKEN_ENDPOINT
           valueFrom:
             configMapKeyRef:
-              name: oid4vc-config
+              name: oid4vc-config-bank
               key: REACT_APP_TOKEN_ENDPOINT
         - name: BANK_AGENT_ID
           valueFrom:
             configMapKeyRef:
-              name: oid4vc-config
+              name: oid4vc-config-bank
               key: BANK_AGENT_ID
         - name: REACT_APP_BANK_AGENT_ID
           valueFrom:
             configMapKeyRef:
-              name: oid4vc-config
+              name: oid4vc-config-bank
               key: REACT_APP_BANK_AGENT_ID
+        - name: BANK_AGENT_CLIENT_ID
+          valueFrom:
+            configMapKeyRef:
+              name: oid4vc-config-bank
+              key: BANK_AGENT_CLIENT_ID
+        - name: REACT_APP_BANK_AGENT_CLIENT_ID
+          valueFrom:
+            configMapKeyRef:
+              name: oid4vc-config-bank
+              key: REACT_APP_BANK_AGENT_CLIENT_ID
         - name: BANK_AGENT_PASSWORD
           valueFrom:
             configMapKeyRef:
-              name: oid4vc-config
+              name: oid4vc-config-bank
               key: BANK_AGENT_PASSWORD
         - name: REACT_APP_BANK_AGENT_PASSWORD
           valueFrom:
             configMapKeyRef:
-              name: oid4vc-config
+              name: oid4vc-config-bank
               key: REACT_APP_BANK_AGENT_PASSWORD
         - name: EXCHANGE_TEMPLATE_ID
           valueFrom:
             configMapKeyRef:
-              name: oid4vc-config
+              name: oid4vc-config-bank
               key: EXCHANGE_TEMPLATE_ID
         - name: REACT_APP_EXCHANGE_TEMPLATE_ID
           valueFrom:
             configMapKeyRef:
-              name: oid4vc-config
+              name: oid4vc-config-bank
               key: REACT_APP_EXCHANGE_TEMPLATE_ID
+        - name: HR_EXCHANGE_TEMPLATE_ID
+          valueFrom:
+            configMapKeyRef:
+              name: oid4vc-config-bank
+              key: HR_EXCHANGE_TEMPLATE_ID
+        - name: REACT_APP_HR_EXCHANGE_TEMPLATE_ID
+          valueFrom:
+            configMapKeyRef:
+              name: oid4vc-config-bank
+              key: REACT_APP_HR_EXCHANGE_TEMPLATE_ID
+        - name: REACT_APP_BANK_W3_ROOT
+          valueFrom:
+            configMapKeyRef:
+              name: oid4vc-config-bank
+              key: REACT_APP_BANK_W3_ROOT
+        - name: REACT_APP_BANK_CLIENT_ID
+          valueFrom:
+            configMapKeyRef:
+              name: oid4vc-config-bank
+              key: REACT_APP_BANK_CLIENT_ID
+        - name: REACT_APP_BANK_CLIENT_SECRET
+          valueFrom:
+            configMapKeyRef:
+              name: oid4vc-config-bank
+              key: REACT_APP_BANK_CLIENT_SECRET
+        - name: REACT_APP_BANK_REDIRECT_URL
+          valueFrom:
+            configMapKeyRef:
+              name: oid4vc-config-bank
+              key: REACT_APP_BANK_REDIRECT_URL
+        - name: REACT_APP_BANK_LOGOUT_REDIRECT_URL
+          valueFrom:
+            configMapKeyRef:
+              name: oid4vc-config-bank
+              key: REACT_APP_BANK_LOGOUT_REDIRECT_URL
+        - name: IBM_VERIFY_BASE_URL
+          valueFrom:
+            configMapKeyRef:
+              name: oid4vc-config-bank
+              key: IBM_VERIFY_BASE_URL
+        - name: IBM_VERIFY_TOKEN_URL
+          valueFrom:
+            configMapKeyRef:
+              name: oid4vc-config-bank
+              key: IBM_VERIFY_TOKEN_URL
+        - name: IBM_VERIFY_CLIENT_ID
+          valueFrom:
+            configMapKeyRef:
+              name: oid4vc-config-bank
+              key: IBM_VERIFY_CLIENT_ID
+        - name: IBM_VERIFY_CLIENT_SECRET
+          valueFrom:
+            configMapKeyRef:
+              name: oid4vc-config-bank
+              key: IBM_VERIFY_CLIENT_SECRET
+        - name: IBM_VERIFY_BANK_USERS_GROUP
+          valueFrom:
+            configMapKeyRef:
+              name: oid4vc-config-bank
+              key: IBM_VERIFY_BANK_USERS_GROUP
+        - name: IBM_VERIFY_FIDO2_RELYING_PARTY_ID
+          valueFrom:
+            configMapKeyRef:
+              name: oid4vc-config-bank
+              key: IBM_VERIFY_FIDO2_RELYING_PARTY_ID
+        - name: PROJECT_NAME
+          valueFrom:
+            configMapKeyRef:
+              name: oid4vc-config-bank
+              key: PROJECT_NAME
+        volumeMounts:
+        - name: webapps-tls
+          mountPath: /certs
+          readOnly: true
+      volumes:
+      - name: webapps-tls
+        secret:
+          secretName: oid4vc-webapps-tls
+          items:
+          - key: tls.crt
+            path: webapps.crt
+          - key: tls.key
+            path: webapps.key
 ---
 apiVersion: v1
 kind: Service
@@ -86,5 +179,3 @@ spec:
   - port: 8091
     targetPort: 3000
   type: ClusterIP
-
-# Made with Bob

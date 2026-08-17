@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IBM Digital Credentials | Bank API</title>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,300;0,400;0,600;1,400&family=IBM+Plex+Mono&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --cds-interactive-01: #0f62fe;
+            --cds-ui-background: #ffffff;
+            --cds-ui-01: #f4f4f4;
+            --cds-ui-02: #e0e0e0;
+            --cds-ui-03: #c6c6c6;
+            --cds-text-01: #161616;
+            --cds-text-02: #525252;
+            --cds-inverse-01: #ffffff;
+            --cds-editor-background: #262626;
+            --cds-tag-background: #e5f0ff;
+            --cds-tag-text: #0043ce;
+        }
+
+        body {
+            font-family: 'IBM Plex Sans', sans-serif;
+            background-color: var(--cds-ui-01);
+            color: var(--cds-text-01);
+            margin: 0;
+            padding: 0;
+            line-height: 1.6;
+        }
+
+        header {
+            background-color: var(--cds-text-01);
+            color: var(--cds-inverse-01);
+            padding: 1.5rem 2rem;
+            display: flex;
+            align-items: center;
+            border-bottom: 4px solid var(--cds-interactive-01);
+        }
+
+        header h1 {
+            margin: 0;
+            font-weight: 400;
+            font-size: 1.5rem;
+        }
+
+        header h1 strong {
+            font-weight: 600;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 2rem auto;
+            background: var(--cds-ui-background);
+            padding: 3rem;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+
+        h2 {
+            font-weight: 600;
+            font-size: 1.75rem;
+            border-bottom: 1px solid var(--cds-ui-02);
+            padding-bottom: 0.5rem;
+            margin-top: 3rem;
+            margin-bottom: 1.5rem;
+            color: var(--cds-text-01);
+        }
+
+        h3 {
+            font-weight: 600;
+            font-size: 1.25rem;
+            margin-top: 2.5rem;
+        }
+
+        h4 {
+            font-weight: 600;
+            font-size: 1.1rem;
+            margin-top: 1.5rem;
+            margin-bottom: 0.5rem;
+        }
+
+        p, li {
+            color: var(--cds-text-02);
+            font-size: 1rem;
+        }
+
+        .endpoint {
+            background: var(--cds-ui-background);
+            border: 1px solid var(--cds-ui-02);
+            border-left: 4px solid var(--cds-interactive-01);
+            padding: 2rem;
+            margin: 1.5rem 0;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.05);
+        }
+
+        .endpoint-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 1rem;
+            font-family: 'IBM Plex Mono', monospace;
+        }
+
+        .method-badge {
+            background: var(--cds-interactive-01);
+            color: var(--cds-inverse-01);
+            padding: 0.35rem 0.75rem;
+            font-size: 0.875rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            margin-right: 1.5rem;
+            letter-spacing: 0.5px;
+        }
+
+        .method-badge.post { background: #0043ce; }
+        .method-badge.get { background: #0f62fe; }
+
+        .endpoint-path {
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: var(--cds-text-01);
+        }
+
+        .param-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 1rem;
+        }
+
+        .param-table th, .param-table td {
+            text-align: left;
+            padding: 0.75rem;
+            border-bottom: 1px solid var(--cds-ui-02);
+            font-size: 0.875rem;
+        }
+
+        .param-table th {
+            background: var(--cds-ui-01);
+            font-weight: 600;
+            color: var(--cds-text-01);
+        }
+
+        code {
+            font-family: 'IBM Plex Mono', monospace;
+            background: var(--cds-tag-background);
+            color: var(--cds-tag-text);
+            padding: 0.2rem 0.4rem;
+            font-size: 0.875rem;
+            border-radius: 2px;
+        }
+
+        pre {
+            background: var(--cds-editor-background);
+            padding: 1.5rem;
+            overflow-x: auto;
+            color: var(--cds-ui-01);
+            border-radius: 4px;
+            font-size: 0.875rem;
+            line-height: 1.4;
+        }
+
+        pre code {
+            background: transparent;
+            color: inherit;
+            padding: 0;
+        }
+
+        .log-section {
+            margin: 2rem 0;
+        }
+
+        .endpoint .log-section {
+            margin: 1.5rem 0 0 0;
+        }
+        
+        .log-step {
+            margin-bottom: 2rem;
+        }
+
+        .summary-list {
+            margin: 0;
+            padding-left: 1.25rem;
+        }
+
+        .section-list {
+            margin: 0 0 1.5rem 0;
+            padding-left: 1.25rem;
+        }
+
+        .section-list li {
+            margin-bottom: 0.6rem;
+        }
+
+        .flow-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+
+        .flow-list li {
+            display: flex;
+            align-items: flex-start;
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+
+        .flow-number {
+            width: 1.75rem;
+            height: 1.75rem;
+            min-width: 1.75rem;
+            border-radius: 50%;
+            background: var(--cds-interactive-01);
+            color: var(--cds-inverse-01);
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            font-size: 0.875rem;
+            line-height: 1;
+            margin-top: 0.1rem;
+        }
+
+        .flow-text {
+            flex: 1;
+        }
+
+        .section-heading {
+            font-weight: 600;
+            font-size: 1.5rem;
+            border-bottom: 1px solid var(--cds-ui-02);
+            padding-bottom: 0.5rem;
+            margin-top: 2rem;
+            margin-bottom: 1.5rem;
+            color: var(--cds-text-01);
+        }
+    </style>
+</head>
+<body>
+
+<header>
+    <h1>IBM Digital Credentials // <strong>Bank App API</strong></h1>
+</header>
+
+<div class="container">
+    <p>Ok, so documentation for API across the bank app. There is a layered approach. Quick notes: All api routes go through a proxy. This means the front end never actually calls IBM api's directly, they always call their own proxy which passes the requests through. </p>
+
+    <h2>System Responsibilities</h2>
+    <h3>Frontend / React application</h3>
+    <ul class="section-list">
+        <li>Only calls local endpoints like <code>/credentials/verifiable/presentation</code>.</li>
+        <li>Does not talk to Diagency directly or hold secrets.</li>
+    </ul>
+
+    <h3>Express server / proxy layer</h3>
+    <ul class="section-list">
+        <li>Serves the frontend and handles the local API routes.</li>
+        <li>Gets the Bank Agent token with <code>client_credentials</code>.</li>
+        <li>Stores the current exchange in <code>req.session.dcRes</code>. If exchanges exist, delete to ensure single source of truth and multiple sessions don't get stored.</li>
+    </ul>
+
+    <h3>Upstream backend / IBM Diagency</h3>
+    <ul class="section-list">
+        <li>Creates and manages the presentation exchange. This is IBM infrastructure.</li>
+        <li>Returns the live exchange state and the final verified data. This gets passed back through the proxy to the frontend.</li>
+        <li>The real exchange state lives SERVER SIDE (very important!), not in the browser.</li>
+    </ul>
+
+    <h2>Runtime Configuration & Session Model</h2>
+    <h3>Express session state</h3>
+    <ul class="section-list">
+        <li>Cookie name: <code>bank.session.id</code>.</li>
+        <li>The server keeps the latest exchange response in <code>req.session.dcRes</code>. It will delete any existing to remove duplicates</li>
+        <li>The important bit is the SERVER SIDE exchange <code>id</code>, because that is what later requests use.</li>
+    </ul>
+
+    <h3>What the main functions do</h3>
+    <ul class="section-list">
+        <li><code>setupProxy</code>: sets up body parsing, sessions, logging, and the <code>/credentials</code> router.</li>
+        <li><code>getOrRefreshBankToken</code>: gets or reuses the Bank Agent token used for upstream calls.</li>
+        <li><code>preCallDigitalCredsService</code>: builds the target URL, adds the bearer token, and prepares the upstream request.</li>
+        <li><code>callDigitalCredsService</code>: actually sends the fetch request to Diagency and normalises the response into <code>status</code>, <code>headers</code>, <code>json</code>, <code>data</code>, or <code>buffer</code>.</li>
+        <li><code>sendDigitalCredsResult</code>: takes that normalised result and sends it back to the browser.</li>
+    </ul>
+
+    <h2>Proxy Routes & Endpoints</h2>
+
+    <div class="endpoint">
+        <div class="endpoint-header">
+            <span class="method-badge post">POST</span>
+            <span class="endpoint-path">/credentials/verifiable/presentation</span>
+        </div>
+        <p><strong>What it does:</strong> Starts a new presentation exchange, or clears the old one first if the session already has one.</p>
+        <p><strong>Server call:</strong> <code>POST /v1.0/oidvc/vp/exchange</code>, and sometimes <code>DELETE /v1.0/oidvc/vp/exchange/:id</code> first (If exists already).</p>
+        <ul class="section-list">
+            <li>The route handler works out whether there is already an active exchange in <code>req.session.dcRes</code>.</li>
+            <li>If there is one, it deletes the old exchange first.</li>
+            <li>It then creates a new exchange and stores the response in the session.</li>
+            <li>The browser gets back the wallet engagement data it needs for the QR step.</li>
+        </ul>
+    </div>
+
+    <div class="endpoint">
+        <div class="endpoint-header">
+            <span class="method-badge get">GET</span>
+            <span class="endpoint-path">/credentials/verifiable/presentation</span>
+        </div>
+        <p><strong>What it does:</strong> Polls the current presentation exchange.</p>
+        <p><strong>Upstream call:</strong> <code>GET /v1.0/oidvc/vp/exchange/:id</code>.</p>
+        <ul class="section-list">
+            <li>The route reads the exchange id from <code>req.session.dcRes</code>.</li>
+            <li>The proxy calls Diagency for the latest exchange state. This is where it verifies using IBM software</li>
+            <li>The updated response is written back into the session.</li>
+            <li>The browser gets the latest <code>execution_state</code> and related data.</li>
+        </ul>
+
+        <h3 class="section-heading">Application Flow & Tracing Logs</h3>
+        <p>I set up a bunch of logging throughout the different stages. This allowed me to try and visualise what is happening when I visit pages and start the UI flows. Here is some of the further data from those logs to help you visualise the exchanges first hand.</p>
+
+        <div class="log-section">
+            <div class="log-step">
+                <h4>1. Client Request Arrival</h4>
+                <p>The browser calls the local Bank endpoint. The middleware logs the request and shows the session already has an exchange id.</p>
+                <pre><code>[BANK-FLOW] request:start {
+  traceId: 'f704fc1f-9138-4cdd-b5a8-e33a33d7d1f6',
+  method: 'GET',
+  url: '/credentials/verifiable/presentation',
+  session: {
+    sessionId: '0ZUTCM84FAHkewzgAPu1wFxibchQqgCQ',
+    hasDcRes: true,
+    exchangeId: '8f57d003-6cd5-464a-a530-66f114a52326'
+  }
+}</code></pre>
+            </div>
+
+            <div class="log-step">
+                <h4>2. Route Handler & Session Lookup</h4>
+                <p>The route confirms that there is already a session-backed exchange, so it can go straight into polling.</p>
+                <pre><code>[BANK-FLOW] route:get-verifiable-presentation:start {
+  traceId: 'f704fc1f-9138-4cdd-b5a8-e33a33d7d1f6',
+  session: {
+    sessionId: '0ZUTCM84FAHkewzgAPu1wFxibchQqgCQ',
+    hasDcRes: true,
+    exchangeId: '8f57d003-6cd5-464a-a530-66f114a52326'
+  }
+}</code></pre>
+            </div>
+
+            <div class="log-step">
+                <h4>3. Bank Agent Token Reuse</h4>
+                <p><code>getOrRefreshBankToken</code> checks whether it can reuse the current token instead of asking for a new one.</p>
+                <pre><code>[BANK-FLOW] token:cache-hit {
+  expiresAt: 1776060548555,
+  accessToken: 'eyJhbGciOiJSUzI1NiIsImtp...'
+}</code></pre>
+            </div>
+
+            <div class="log-step">
+                <h4>4. Upstream Proxy Preparation</h4>
+                <p><code>preCallDigitalCredsService</code> builds the upstream request to <code>iviadcgw</code> and injects the Bank Agent bearer token.</p>
+                <pre><code>[BANK-FLOW] proxy:prepare {
+  traceId: undefined,
+  session: { sessionId: undefined, hasDcRes: false, exchangeId: null },
+  path: '/v1.0/oidvc/vp/exchange/8f57d003-6cd5-464a-a530-66f114a52326',
+  targetUrl: 'https://iviadcgw:8443/diagency/v1.0/oidvc/vp/exchange/8f57d003-6cd5-464a-a530-66f114a52326'
+}</code></pre>
+            </div>
+
+            <div class="log-step">
+                <h4>5. Outbound Request & TLS Trust</h4>
+                <p><code>callDigitalCredsService</code> sends the real request to the gateway using the mounted CA bundle.</p>
+                <pre><code>[BANK-FLOW] proxy:request {
+    traceId: undefined,
+    session: { sessionId: undefined, hasDcRes: false, exchangeId: null },
+  targetUrl: 'https://iviadcgw:8443/diagency/v1.0/oidvc/vp/exchange/8f57d003-6cd5-464a-a530-66f114a52326',
+    method: 'GET',
+    headers: {
+        'Content-Type': 'application/json',
+        authorization: 'Bearer eyJhbGciOiJSUzI1NiIsImtp...snipped...',
+        host: 'iviadcgw:8443'
+    },
+    body: undefined
+}
+
+[HTTPS-AGENT] Using custom CA certificate from: /certs/ca-bundle.pem (2315 bytes)</code></pre>
+            </div>
+
+            <div class="log-step">
+                <h4>6. Upstream Response & Session Update</h4>
+                <p>The gateway returns the latest exchange payload, then the session is updated and <code>sendDigitalCredsResult</code> sends it back to the browser.</p>
+                <pre><code>[BANK-FLOW] proxy:response {
+  result: {
+    status: 200,
+    json: {
+      id: '8f57d003-6cd5-464a-a530-66f114a52326',
+      template_id: '8642b9d8-f766-4572-a1f0-6a30a95a4c2b',
+      execution_state: 'sent',
+      wallet_engagement: 'openid4vp://?response_type=vp_token&client_id=redirect_uri...'
+    }
+  }
+}
+
+[BANK-FLOW] route:get-verifiable-presentation:session-updated {
+  traceId: 'f704fc1f-9138-4cdd-b5a8-e33a33d7d1f6',
+  session: {
+    sessionId: '0ZUTCM84FAHkewzgAPu1wFxibchQqgCQ',
+    hasDcRes: true,
+    exchangeId: '8f57d003-6cd5-464a-a530-66f114a52326'
+  }
+}</code></pre>
+            </div>
+        </div>
+    </div>
+
+    <div class="endpoint">
+        <div class="endpoint-header">
+            <span class="method-badge get">GET</span>
+            <span class="endpoint-path">/credentials/verifiable/presentation/vc</span>
+        </div>
+        <p><strong>What it does:</strong> Gets the final verified attributes after the presentation succeeds.</p>
+        <p><strong>Upstream call:</strong> <code>GET /v1.0/diagency/verifications/:id</code>.</p>
+        <ul class="section-list">
+            <li>The route uses the exchange id already stored in the session.</li>
+            <li>The proxy fetches the verification result from Diagency.</li>
+            <li>Only the decoded <code>attributes</code> are passed back to the browser.</li>
+            <li>This keeps the frontend payload small and focused on what the form actually needs.</li>
+        </ul>
+        <p><strong>Main functions involved:</strong> <code>preCallDigitalCredsService</code>, <code>callDigitalCredsService</code>, <code>sendDigitalCredsResult</code>.</p>
+    </div>
+
+    <h2>End-to-End Verification Flow</h2>
+
+    <ol class="flow-list">
+        <li><span class="flow-number">1</span><span class="flow-text">The user opens <code>/signup</code> and starts the bank account flow.</span></li>
+        <li><span class="flow-number">2</span><span class="flow-text">The frontend calls <code>POST /credentials/verifiable/presentation</code> to create an exchange.</span></li>
+        <li><span class="flow-number">3</span><span class="flow-text">The proxy stores the upstream response in <code>req.session.dcRes</code> and sends back the wallet engagement data.</span></li>
+        <li><span class="flow-number">4</span><span class="flow-text">The frontend shows a QR code or wallet link from that response.</span></li>
+        <li><span class="flow-number">5</span><span class="flow-text">The frontend polls <code>GET /credentials/verifiable/presentation</code> until the exchange finishes.</span></li>
+        <li><span class="flow-number">6</span><span class="flow-text">When it succeeds, the frontend calls <code>GET /credentials/verifiable/presentation/vc</code> to get the verified attributes.</span></li>
+        <li><span class="flow-number">7</span><span class="flow-text">Those attributes are mapped into the signup form so the user can carry on.</span></li>
+    </ol>
+
+</div>
+
+</body>
+</html>

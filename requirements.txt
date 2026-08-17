@@ -1,2 +1,6 @@
 Requests==2.33.1
-urllib3==2.6.3
+urllib3==2.7.0
+cryptography==50.0.0
+cbor2==5.9.0
+pycose==1.1.0
+playwright==1.59.0

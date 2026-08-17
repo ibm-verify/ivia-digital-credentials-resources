@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title desc">
+  <title id="title">HR Portal Logo</title>
+  <desc id="desc">Stylized HR initials inside a rounded square badge.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#123b38" />
+      <stop offset="100%" stop-color="#b56a2d" />
+    </linearGradient>
+  </defs>
+  <rect x="8" y="8" width="112" height="112" rx="28" fill="url(#bg)" />
+  <path d="M34 34h14v20h18V34h14v60H66V66H48v28H34z" fill="#f6f0e7" />
+  <path d="M90 34h14c13.255 0 24 10.745 24 24 0 8.263-4.184 15.549-10.548 19.863L128 94H111.5L101 80H90zm14 34c5.523 0 10-4.477 10-10s-4.477-10-10-10H90v20z" transform="translate(-20 0)" fill="#f6f0e7" />
+</svg>

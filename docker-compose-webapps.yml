@@ -1,21 +1,21 @@
 services:
   dmv-app:
-    # platform: linux/amd64
-    build:
-      context: .
-      dockerfile: ./dmv-app/Dockerfile
-    image: dmv-app
+    platform: linux/amd64
+    image: localhost/dmv-app:latest
     ports:
       - "8090:3000"
     volumes:
-      - ./dmv-app:/app
-      - /app/node_modules
       - ./dc-agency/docker/ca-bundle.pem:/certs/ca-bundle.pem:ro
+      - ./dc-agency/docker/webapps.crt:/certs/webapps.crt:ro
+      - ./dc-agency/docker/webapps.key:/certs/webapps.key:ro
     environment:
       - CUSTOM_CA_PATH=/certs/ca-bundle.pem
       - NODE_EXTRA_CA_CERTS=/certs/ca-bundle.pem
+      - SSL_CERT=/certs/webapps.crt
+      - SSL_KEY=/certs/webapps.key
+      - DMV_FLOW_VERBOSE_LOGS=${DMV_FLOW_VERBOSE_LOGS:-false}
     env_file:
-      - ./.env
+      - ./.env.dmv
     deploy:
       resources:
         limits:
@@ -26,23 +26,50 @@ services:
       - dmv-network
       - iviadc-demo
 
-  bank-app:
-    # platform: linux/amd64
-    build:
-      context: .
-      dockerfile: ./bank-app/Dockerfile
-    image: bank-app
+  hr-portal:
+    platform: linux/amd64
+    image: localhost/hr-portal:latest
     ports:
-      - "8091:3000"
+      - "8092:3000"
     volumes:
-      - ./bank-app:/app
-      - /app/node_modules
       - ./dc-agency/docker/ca-bundle.pem:/certs/ca-bundle.pem:ro
+      - ./dc-agency/docker/webapps.crt:/certs/webapps.crt:ro
+      - ./dc-agency/docker/webapps.key:/certs/webapps.key:ro
     environment:
       - CUSTOM_CA_PATH=/certs/ca-bundle.pem
       - NODE_EXTRA_CA_CERTS=/certs/ca-bundle.pem
+      - SSL_CERT=/certs/webapps.crt
+      - SSL_KEY=/certs/webapps.key
+      - HR_FLOW_VERBOSE_LOGS=${HR_FLOW_VERBOSE_LOGS:-false}
     env_file:
-      - ./.env
+      - ./.env.hr
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+    networks:
+      - hr-network
+      - iviadc-demo
+
+  bank-app:
+    platform: linux/amd64
+    image: localhost/bank-app:latest
+    ports:
+      - "8091:3000"
+    volumes:
+      - ./dc-agency/docker/ca-bundle.pem:/certs/ca-bundle.pem:ro
+      - ./dc-agency/docker/webapps.crt:/certs/webapps.crt:ro
+      - ./dc-agency/docker/webapps.key:/certs/webapps.key:ro
+    environment:
+      - CUSTOM_CA_PATH=/certs/ca-bundle.pem
+      - NODE_EXTRA_CA_CERTS=/certs/ca-bundle.pem
+      - SSL_CERT=/certs/webapps.crt
+      - SSL_KEY=/certs/webapps.key
+      - BANK_FLOW_VERBOSE_LOGS=${BANK_FLOW_VERBOSE_LOGS:-false}
+    env_file:
+      - ./.env.bank
     deploy:
       resources:
         limits:
@@ -56,10 +83,10 @@ services:
 networks:
   dmv-network:
     name: dmv-network
+  hr-network:
+    name: hr-network
   bank-network:
     name: bank-network
   iviadc-demo:
     name: iviadc-demo
     external: true
-
-# Made with Bob

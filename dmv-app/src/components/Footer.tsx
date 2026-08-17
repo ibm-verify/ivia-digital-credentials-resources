@@ -2,6 +2,12 @@ import React from 'react';
 import { Container, Box, Typography, Link } from '@mui/material';
 
 const Footer: React.FC = () => {
+  const accountUrl = window.ENV?.REACT_APP_ACCOUNT_URL?.replace(/\/$/, '') ?? '';
+  const agentId = window.ENV?.REACT_APP_DMV_AGENT_ID ?? '';
+  const issuerMetadataUrl = accountUrl && agentId
+    ? `${accountUrl}/v1.0/diagency/trust/anchor/${agentId}/.well-known/openid-credential-issuer`
+    : '#';
+
   return (
     <Box
       component="footer"
@@ -21,7 +27,7 @@ const Footer: React.FC = () => {
             </Typography>
           </Box>
           <Box sx={{ display: 'flex', gap: 3 }}>
-            <Link href="#" color="primary" underline="hover">Privacy Policy</Link>
+            <Link href={issuerMetadataUrl} color="primary" underline="hover" target="_blank" rel="noopener noreferrer">Privacy Policy</Link>
             <Link href="#" color="primary" underline="hover">Terms of Service</Link>
             <Link href="#" color="primary" underline="hover">Contact Us</Link>
           </Box>

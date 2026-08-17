@@ -18,8 +18,8 @@ class VciCredentialService {
   async initialize(): Promise<void> {
     try {
       // Get schema ID and credential definition ID from window.ENV
-      const schemaId = (window as any).ENV?.REACT_APP_CREDENTIAL_SCHEMA_ID;
-      const definitionId = (window as any).ENV?.REACT_APP_CREDENTIAL_DEFINITION_ID;
+      const schemaId = window.ENV?.REACT_APP_CREDENTIAL_SCHEMA_ID;
+      const definitionId = window.ENV?.REACT_APP_CREDENTIAL_DEFINITION_ID;
 
       if (!schemaId || !definitionId) {
         throw new Error('Missing credential schema or definition ID');
@@ -75,11 +75,7 @@ class VciCredentialService {
         throw new Error('Credential definition ID not found');
       }
 
-      // NOTE: Portrait image encoding is disabled due to API payload size limitations
-      // The DC agency API has a length limit that prevents including the full image
-      // If this limitation is resolved in the future, uncomment the following line and add to payload:
-      // const hexPortraitString = await this.imageUrlToHex(defaultProfileImage);
-      // Then add to payload: "org.iso.18013.5.1:portrait": "h'" + hexPortraitString + "'"
+      const issuingCountry = userProfile.issuingCountry || 'AU';
 
       // Prepare the payload
       const payload = {
@@ -91,7 +87,11 @@ class VciCredentialService {
           "org.iso.18013.5.1:given_name": userProfile.firstName,
           "org.iso.18013.5.1:family_name": userProfile.lastName,
           "org.iso.18013.5.1:birth_date": userProfile.dateOfBirth,
+          "org.iso.18013.5.1:issuing_country": issuingCountry,
           "org.iso.18013.5.1:issuing_authority": userProfile.issuingAuthority,
+          "org.iso.18013.5.1:portrait": "/9j/4AAQSkZJRgABAQEAYABgAAD/4QBmRXhpZgAASUkqAAgAAAAEABoBBQABAAAAPgAAABsBBQABAAAARgAAACgBAwABAAAAAgAAADEBAgAQAAAATgAAAAAAAABgAAAAAQAAAGAAAAABAAAAUGFpbnQuTkVUIHYzLjMwAP/bAEMAAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAf/bAEMBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAf/AABEIAAEAAQMBIgACEQEDEQH/xAAfAAABBQEBAQEBAQAAAAAAAAAAAQIDBAUGBwgJCgv/xAC1EAACAQMDAgQDBQUEBAAAAX0BAgMABBEFEiExQQYTUWEHInEUMoGRoQgjQrHBFVLR8CQzYnKCCQoWFxgZGiUmJygpKjQ1Njc4OTpDREVGR0hJSlNUVVZXWFlaY2RlZmdoaWpzdHV2d3h5eoOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4eLj5OXm5+jp6vHy8/T19vf4+fr/xAAfAQADAQEBAQEBAQEBAAAAAAAAAQIDBAUGBwgJCgv/xAC1EQACAQIEBAMEBwUEBAABAncAAQIDEQQFITEGEkFRB2FxEyIygQgUQpGhscEJIzNS8BVictEKFiQ04SXxFxgZGiYnKCkqNTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqCg4SFhoeIiYqSk5SVlpeYmZqio6Slpqeoqaqys7S1tre4ubrCw8TFxsfIycrS09TV1tfY2dri4+Tl5ufo6ery8/T19vf4+fr/2gAMAwEAAhEDEQA/ACiiigD/2Q==",
+          "org.iso.18013.5.1:driving_privileges": userProfile.drivingPrivileges,
+          "org.iso.18013.5.1:un_distinguishing_sign": issuingCountry,
           "org.iso.18013.5.1:resident_address": userProfile.residentAddress,
           "org.iso.18013.5.1:resident_city": userProfile.residentCity,
           "org.iso.18013.5.1:resident_state": userProfile.residentState,
@@ -119,13 +119,10 @@ class VciCredentialService {
    * @param offerId The ID of the offer
    * @returns A promise that resolves to the PNG image as a Blob
    */
-  async fetchOfferImage(offerId: string): Promise<Blob> {
+  async fetchOfferImage(): Promise<Blob> {
     try {
-      // Create the request URL - use relative paths for the proxy
-      const url = `/credentials/offers/${offerId}`;
-      
-      // Use the new authenticatedRawRequest method which returns the raw Response
-      const response = await diagencyApiService.authenticatedRawRequest(url, {
+      // The server resolves the offer ID from the session — no ID in the URL.
+      const response = await diagencyApiService.authenticatedRawRequest('/credentials/offers', {
         method: 'GET',
         headers: {
           'Accept': 'image/png'
@@ -146,22 +143,20 @@ class VciCredentialService {
    */
   async createOfferAndFetchImage(userProfile: any): Promise<{ id: string, imageBlob: Blob, walletEngagement: string }> {
     try {
-      // First create the credential offer - authenticatedRequest will handle the token
+      // Create the offer — the server stores the ID in the session.
       const offerResponse = await this.createCredentialOffer(userProfile);
       
       if (!offerResponse || !offerResponse.id) {
         throw new Error('Invalid response from create offer API');
       }
-      
-      const offerId = offerResponse.id;
 
       const walletEngagement = 'openid-credential-offer://?credential_offer=' + encodeURIComponent(JSON.stringify(offerResponse.credentialOfferPayload));
 
-      // Then immediately fetch the image - authenticatedRequest will handle the token
-      const imageBlob = await this.fetchOfferImage(offerId);
+      // Fetch the QR image — server resolves the offer ID from the session.
+      const imageBlob = await this.fetchOfferImage();
       
       return {
-        id: offerId,
+        id: offerResponse.id,
         imageBlob,
         walletEngagement
       };
@@ -175,13 +170,10 @@ class VciCredentialService {
    * @param offerId The ID of the offer to check
    * @returns A promise that resolves to the offer state response
    */
-  async checkOfferState(offerId: string): Promise<{ state: string }> {
+  async checkOfferState(): Promise<{ state: string }> {
     try {
-      // Create the request URL - use relative paths for the proxy
-      const url = `/credentials/offers/${offerId}`;
-      
-      // Use diagencyApiService's authenticatedRequest method
-      return await diagencyApiService.authenticatedRequest(url, {
+      // The server resolves the offer ID from the session — no ID in the URL.
+      return await diagencyApiService.authenticatedRequest('/credentials/offers', {
         method: 'GET',
         headers: {
           'Accept': 'application/json'

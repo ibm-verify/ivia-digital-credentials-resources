@@ -10,8 +10,7 @@ spec:
   port:
     targetPort: 3000
   tls:
-    termination: edge
-    insecureEdgeTerminationPolicy: Redirect
+    termination: passthrough
 ---
 apiVersion: route.openshift.io/v1
 kind: Route
@@ -25,7 +24,18 @@ spec:
   port:
     targetPort: 3000
   tls:
-    termination: edge
-    insecureEdgeTerminationPolicy: Redirect
-
-# Made with Bob
+    termination: passthrough
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: hr-portal
+spec:
+  host: hr-dc.example.com
+  to:
+    kind: Service
+    name: hr-portal
+  port:
+    targetPort: 3000
+  tls:
+    termination: passthrough

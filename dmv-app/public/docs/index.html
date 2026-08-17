@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IBM Digital Credentials | DMV API</title>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,300;0,400;0,600;1,400&family=IBM+Plex+Mono&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --cds-interactive-01: #0f62fe;
+            --cds-ui-background: #ffffff;
+            --cds-ui-01: #f4f4f4;
+            --cds-ui-02: #e0e0e0;
+            --cds-ui-03: #c6c6c6;
+            --cds-text-01: #161616;
+            --cds-text-02: #525252;
+            --cds-inverse-01: #ffffff;
+            --cds-editor-background: #262626;
+            --cds-tag-background: #e5f0ff;
+            --cds-tag-text: #0043ce;
+        }
+
+        body {
+            font-family: 'IBM Plex Sans', sans-serif;
+            background-color: var(--cds-ui-01);
+            color: var(--cds-text-01);
+            margin: 0;
+            padding: 0;
+            line-height: 1.6;
+        }
+
+        header {
+            background-color: var(--cds-text-01);
+            color: var(--cds-inverse-01);
+            padding: 1.5rem 2rem;
+            display: flex;
+            align-items: center;
+            border-bottom: 4px solid var(--cds-interactive-01);
+        }
+
+        header h1 {
+            margin: 0;
+            font-weight: 400;
+            font-size: 1.5rem;
+        }
+
+        header h1 strong {
+            font-weight: 600;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 2rem auto;
+            background: var(--cds-ui-background);
+            padding: 3rem;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+
+        h2 {
+            font-weight: 600;
+            font-size: 1.75rem;
+            border-bottom: 1px solid var(--cds-ui-02);
+            padding-bottom: 0.5rem;
+            margin-top: 3rem;
+            margin-bottom: 1.5rem;
+            color: var(--cds-text-01);
+        }
+
+        h3 {
+            font-weight: 600;
+            font-size: 1.25rem;
+            margin-top: 2.5rem;
+        }
+
+        h4 {
+            font-weight: 600;
+            font-size: 1.1rem;
+            margin-top: 1.5rem;
+            margin-bottom: 0.5rem;
+        }
+
+        p, li {
+            color: var(--cds-text-02);
+            font-size: 1rem;
+        }
+
+        .endpoint {
+            background: var(--cds-ui-background);
+            border: 1px solid var(--cds-ui-02);
+            border-left: 4px solid var(--cds-interactive-01);
+            padding: 2rem;
+            margin: 1.5rem 0;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.05);
+        }
+
+        .endpoint-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 1rem;
+            font-family: 'IBM Plex Mono', monospace;
+        }
+
+        .method-badge {
+            background: var(--cds-interactive-01);
+            color: var(--cds-inverse-01);
+            padding: 0.35rem 0.75rem;
+            font-size: 0.875rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            margin-right: 1.5rem;
+            letter-spacing: 0.5px;
+        }
+
+        .method-badge.post { background: #0043ce; }
+        .method-badge.get { background: #0f62fe; }
+
+        .endpoint-path {
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: var(--cds-text-01);
+        }
+
+        code {
+            font-family: 'IBM Plex Mono', monospace;
+            background: var(--cds-tag-background);
+            color: var(--cds-tag-text);
+            padding: 0.2rem 0.4rem;
+            font-size: 0.875rem;
+            border-radius: 2px;
+        }
+
+        pre {
+            background: var(--cds-editor-background);
+            padding: 1.5rem;
+            overflow-x: auto;
+            color: var(--cds-ui-01);
+            border-radius: 4px;
+            font-size: 0.875rem;
+            line-height: 1.4;
+        }
+
+        pre code {
+            background: transparent;
+            color: inherit;
+            padding: 0;
+        }
+
+        .log-section {
+            margin: 2rem 0;
+        }
+
+        .endpoint .log-section {
+            margin: 1.5rem 0 0 0;
+        }
+        
+        .log-step {
+            margin-bottom: 2rem;
+        }
+
+        .summary-list {
+            margin: 0;
+            padding-left: 1.25rem;
+        }
+
+        .section-list {
+            margin: 0 0 1.5rem 0;
+            padding-left: 1.25rem;
+        }
+
+        .section-list li {
+            margin-bottom: 0.6rem;
+        }
+
+        .flow-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+
+        .flow-list li {
+            display: flex;
+            align-items: flex-start;
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+
+        .flow-number {
+            width: 1.75rem;
+            height: 1.75rem;
+            min-width: 1.75rem;
+            border-radius: 50%;
+            background: var(--cds-interactive-01);
+            color: var(--cds-inverse-01);
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            font-size: 0.875rem;
+            line-height: 1;
+            margin-top: 0.1rem;
+        }
+
+        .flow-text {
+            flex: 1;
+        }
+
+        .section-heading {
+            font-weight: 600;
+            font-size: 1.5rem;
+            border-bottom: 1px solid var(--cds-ui-02);
+            padding-bottom: 0.5rem;
+            margin-top: 2rem;
+            margin-bottom: 1.5rem;
+            color: var(--cds-text-01);
+        }
+    </style>
+</head>
+<body>
+
+<header>
+    <h1>IBM Digital Credentials // <strong>DMV App API</strong></h1>
+</header>
+
+<div class="container">
+    <p>This is documentation for the DMV App, and the workflow of adding credentials to your profile. This uses a layered approach, the front end never directly calls IBM backend, instead it's masked through a proxy. The UI calls proxy, which handled calling IBM infrastructure on the server.</p>
+
+    <h2>System Responsibilities</h2>
+    <h3>Frontend / React application</h3>
+    <ul class="section-list">
+        <li>Starts login with <code>/auth/login</code> and creates offers with <code>/credentials/offers</code>.</li>
+        <li>Does not hold OIDC client secrets or agent tokens.</li>
+    </ul>
+
+    <h3>Express server / proxy layer</h3>
+    <ul class="section-list">
+        <li>Serves the frontend and runs the auth and credential routes.</li>
+        <li>Keeps <code>req.session.user</code> for browser auth.</li>
+        <li>Also keeps a separate DMV Agent token for issuing credentials upstream.</li>
+    </ul>
+
+    <h3>Upstream backend / IBM Verify + Diagency</h3>
+    <ul class="section-list">
+        <li>IBM Verify handles user sign-in.</li>
+        <li>Diagency creates and manages the credential offers. Server side.</li>
+        <li>Returns the login details, offer state, and QR data the app needs.</li>
+    </ul>
+
+    <h2>OIDC Authentication Routes</h2>
+
+    <div class="endpoint">
+        <div class="endpoint-header">
+            <span class="method-badge get">GET</span>
+            <span class="endpoint-path">/auth/login</span>
+        </div>
+        <p><strong>Overview:</strong> Initialises the OpenID Connect PKCE authorisation flow.</p>
+        <p><strong>Backend Flow:</strong> The server loads OIDC metadata, derives a PKCE <code>code_verifier</code>, computes the <code>code_challenge</code>, generates a <code>state</code>, and stores those values in the in-memory <code>authParams</code> map. It then returns an <code>authUrl</code> for the React frontend to use as the redirect destination.</p>
+
+                <h3 class="section-heading">Application Flow & Tracing Logs</h3>
+                <p>I added some fun debugging to the server requests, and the API to help us visualise exactly what is happening on each flow.</p>
+
+                <div class="log-section">
+                        <div class="log-step">
+                                <h4>1. Login Route Starts</h4>
+                                <p>The browser calls <code>/auth/login</code>. The server creates a trace id and confirms there is no authenticated DMV session yet.</p>
+                                <pre><code>[DMV-FLOW] route:auth-login:start {
+    traceId: '8d350934-8128-4e7b-9264-07d0508e4621',
+    session: {
+        sessionId: 'jysFOKzmYr1GzC-42dBfR4REL41338kT',
+        authenticated: false,
+        hasUser: false,
+        hasUserInfo: false,
+        tokenExpiresAt: null
+    }
+}</code></pre>
+                        </div>
+
+                        <div class="log-step">
+                                <h4>2. OIDC Discovery Runs</h4>
+                                <p>The backend discovers the IBM Verify metadata from the local gateway before it builds the authorisation URL.</p>
+                                <pre><code>[DMV-FLOW] oidc:discovery:start {
+    issuerUrl: 'https://iviadcgw:8443/oauth2',
+    configUrl: 'https://iviadcgw:8443/oauth2/.well-known/openid-configuration',
+    clientId: 'localdeploy_dmv_client'
+}
+
+[DMV-FLOW] oidc:discovery:success {
+    issuerUrl: 'https://iviadcgw:8443/oauth2',
+    configUrl: 'https://iviadcgw:8443/oauth2/.well-known/openid-configuration',
+    clientId: 'localdeploy_dmv_client'
+}</code></pre>
+                        </div>
+
+                        <div class="log-step">
+                                <h4>3. PKCE State Is Prepared</h4>
+                                <p>The route creates the PKCE parameters and returns the final redirect URL back to the frontend.</p>
+                                <pre><code>[DMV-FLOW] route:auth-login:prepared {
+    traceId: '8d350934-8128-4e7b-9264-07d0508e4621',
+    state: 'WiCCv3ckaN0PF6SD9CeArq8YWxdUPXo2mFlAFIbJLI0',
+    redirectTo: 'https://iviadcgw:8443/oauth2/authorize?...',
+    parameters: {
+        redirect_uri: 'http://localhost:8090/logincallback',
+        scope: 'openid profile email',
+        response_type: 'code',
+        code_challenge_method: 'S256'
+    }
+}</code></pre>
+                        </div>
+                </div>
+    </div>
+
+    <div class="endpoint">
+        <div class="endpoint-header">
+            <span class="method-badge post">POST</span>
+            <span class="endpoint-path">/auth/callback</span>
+        </div>
+        <p><strong>Overview:</strong> Consumes the IBM Verify authorisation code exchange.</p>
+        <p><strong>Backend Flow:</strong> The server validates the incoming <code>state</code>, recovers the stored PKCE verifier, exchanges the authorisation code at <code>/oauth2/token</code>, optionally calls <code>/oauth2/userinfo</code>, and hydrates <code>req.session.user</code> with authenticated state, tokens, login time, and user claims.</p>
+    </div>
+
+    <div class="endpoint">
+        <div class="endpoint-header">
+            <span class="method-badge get">GET</span>
+            <span class="endpoint-path">/auth/status</span>
+        </div>
+        <p><strong>Overview:</strong> Reports the current browser session's authentication state.</p>
+        <p><strong>Backend Flow:</strong> Reads <code>req.session.user.authenticated</code> and returns the authenticated flag with user metadata when available. This allows frontend route guards to decide whether to render <code>/profile</code> or redirect back to login.</p>
+    </div>
+
+    <div class="endpoint">
+        <div class="endpoint-header">
+            <span class="method-badge post">POST</span>
+            <span class="endpoint-path">/auth/logout</span>
+        </div>
+        <p><strong>Overview:</strong> Destroys the local authenticated session.</p>
+        <p><strong>Backend Flow:</strong> If an <code>id_token</code> exists, the server builds an OIDC end-session URL. It then destroys the Express session and returns a logout response the frontend can safely consume.</p>
+    </div>
+
+    <h2>Session & Guard Model</h2>
+    <ul class="section-list">
+        <li>Cookie name: <code>dmv.session.id</code>.</li>
+        <li><code>req.session.user</code> stores the login state and token expiry details.</li>
+        <li><code>requireValidSession</code> blocks all issuance routes if the session is missing or expired.</li>
+    </ul>
+
+    <h2>Verifiable Credential Issuance Routes</h2>
+    <p>All paths mapping to <code>/credentials/*</code> require a valid OIDC-authenticated browser session. Once the browser session is authorised, the server separately uses the DMV Agent's <code>client_credentials</code> token for Diagency requests.</p>
+
+    <div class="endpoint">
+        <div class="endpoint-header">
+            <span class="method-badge post">POST</span>
+            <span class="endpoint-path">/credentials/offers</span>
+        </div>
+        <p><strong>Overview:</strong> Provisions a Verifiable Credential Offer, typically an mDL issuance offer.</p>
+        <p><strong>Frontend Caller:</strong> <code>VciCredentialService.createCredentialOffer()</code> from <code>ProfilePage.tsx</code>.</p>
+        <p><strong>Backend Flow:</strong> The frontend builds the payload from profile data, then the server proxies <code>POST /v1.0/oidvc/vci/offers</code> upstream using the DMV Agent token. This keeps Diagency credentials out of the browser.</p>
+    </div>
+
+    <div class="endpoint">
+        <div class="endpoint-header">
+            <span class="method-badge get">GET</span>
+            <span class="endpoint-path">/credentials/offers/:id</span>
+        </div>
+        <p><strong>Overview:</strong> Retrieves either QR code content or the JSON status for a specific offer.</p>
+        <p><strong>Frontend Caller:</strong> <code>VciCredentialService.fetchOfferImage()</code> and <code>VciCredentialService.checkOfferState()</code>.</p>
+        <p><strong>Backend Flow:</strong> The server validates <code>:id</code> with <code>uuid.validate(id)</code> before forwarding <code>GET /v1.0/oidvc/vci/offers/:id</code> upstream. This reduces arbitrary path abuse and ensures only recognised offer identifiers are proxied.</p>
+
+        <h3 class="section-heading">Application Flow & Examples</h3>
+                <p>The samples below are from <code>dmv-log.md</code>. They show the logged path from a protected offer request through to the upstream response.</p>
+
+                <div class="log-section">
+                <h4>Scenario: Handling a Protected Issuance Proxy Request</h4>
+
+                <div class="log-step">
+                        <h4>1. Session & Route Validation</h4>
+                        <p>The request only proceeds if the DMV session is already authenticated and still valid.</p>
+                        <pre><code>[DMV-FLOW] session:valid {
+    traceId: 'f2ddbd1d-9047-4f94-bc25-363893d429e4',
+    session: {
+        sessionId: 'B3o9Pk9NPe5T-W2BvOJsUZDkwkRj9B3M',
+        authenticated: true,
+        hasUser: true,
+        hasUserInfo: true,
+        tokenExpiresAt: 1776068514989
+    }
+}
+
+[DMV-FLOW] route:get-offer:start {
+    traceId: 'f2ddbd1d-9047-4f94-bc25-363893d429e4',
+    id: 'a6116346-ee19-4540-bee4-a5b9e87e8d94'
+}</code></pre>
+                </div>
+
+                <div class="log-step">
+                        <h4>2. Agent Token Reuse</h4>
+                        <p>The server reuses the cached DMV Agent token instead of asking for a new one for every poll request.</p>
+                        <pre><code>[DMV-FLOW] token:cache-hit {
+    expiresAt: 1776068511738,
+    accessToken: 'eyJhbGciOiJSUzI1NiIsImtp...'
+}</code></pre>
+                </div>
+
+                <div class="log-step">
+                        <h4>3. Proxy Preparation & Forwarding</h4>
+                        <p>The backend builds the upstream URL, injects the bearer token, and forwards the request to the local gateway.</p>
+                        <pre><code>[DMV-FLOW] proxy:prepare {
+    traceId: 'f2ddbd1d-9047-4f94-bc25-363893d429e4',
+    path: '/v1.0/oidvc/vci/offers/a6116346-ee19-4540-bee4-a5b9e87e8d94',
+    targetUrl: 'https://iviadcgw:8443/diagency/v1.0/oidvc/vci/offers/a6116346-ee19-4540-bee4-a5b9e87e8d94',
+    requestMethod: 'GET'
+}
+
+[DMV-FLOW] proxy:request {
+    traceId: 'f2ddbd1d-9047-4f94-bc25-363893d429e4',
+    targetUrl: 'https://iviadcgw:8443/diagency/v1.0/oidvc/vci/offers/a6116346-ee19-4540-bee4-a5b9e87e8d94',
+    method: 'GET',
+    headers: {
+        host: 'iviadcgw:8443',
+        accept: 'image/png',
+        authorization: 'Bearer eyJhbGciOiJSUzI1NiIsImtp...'
+    },
+    body: undefined
+}
+
+[HTTPS-AGENT] Using custom CA certificate from: /certs/ca-bundle.pem (2315 bytes)</code></pre>
+                </div>
+
+                <div class="log-step">
+                        <h4>4. Upstream Response</h4>
+                        <p>The gateway returns the QR image payload, and the proxy logs the final response details before returning it to the frontend.</p>
+                        <pre><code>[DMV-FLOW] proxy:response {
+    traceId: 'f2ddbd1d-9047-4f94-bc25-363893d429e4',
+    targetUrl: 'https://iviadcgw:8443/diagency/v1.0/oidvc/vci/offers/a6116346-ee19-4540-bee4-a5b9e87e8d94',
+    result: {
+        status: 200,
+        headers: {
+            'content-type': 'image/png'
+        },
+        bufferLength: 5089
+    }
+}</code></pre>
+                </div>
+        </div>
+        </div>
+
+    <h2>End-to-End Issuance Flow</h2>
+
+    <ol class="flow-list">
+        <li><span class="flow-number">1</span><span class="flow-text">The user opens the DMV app and clicks <code>Sign in with IBM Verify</code>.</span></li>
+        <li><span class="flow-number">2</span><span class="flow-text"><code>AuthProvider.tsx</code> calls <code>/auth/login</code> and redirects the browser to the provider.</span></li>
+        <li><span class="flow-number">3</span><span class="flow-text">The provider redirects back to <code>/logincallback</code>.</span></li>
+        <li><span class="flow-number">4</span><span class="flow-text"><code>OidcCallback.tsx</code> calls <code>/auth/callback</code>, and the server creates <code>req.session.user</code>.</span></li>
+        <li><span class="flow-number">5</span><span class="flow-text">The user lands on <code>/profile</code> and starts the licence offer flow.</span></li>
+        <li><span class="flow-number">6</span><span class="flow-text"><code>VciCredentialService.ts</code> maps the profile data and posts it to <code>/credentials/offers</code>.</span></li>
+        <li><span class="flow-number">7</span><span class="flow-text">The proxy sends the request upstream and returns the offer payload to the frontend.</span></li>
+        <li><span class="flow-number">8</span><span class="flow-text">The frontend fetches the QR image and keeps polling <code>/credentials/offers/:id</code> until the offer state changes.</span></li>
+    </ol>
+
+</div>
+
+</body>
+</html>

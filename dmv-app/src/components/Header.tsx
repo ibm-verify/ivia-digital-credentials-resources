@@ -1,10 +1,6 @@
-import { AppBar, Toolbar, Box, Button, Tooltip, IconButton, Avatar, Menu, MenuItem, Badge } from "@mui/material"
-import {
-    Login as LoginIcon,
-    Logout as LogoutIcon
-} from '@mui/icons-material';
+import { AppBar, Toolbar, Box, Tooltip, IconButton, Avatar, Menu, MenuItem } from "@mui/material"
+import { Logout as LogoutIcon } from '@mui/icons-material';
 import React from "react";
-import theme from "../theme";
 import { useAuth } from "./AuthProvider";
 
 export interface HeaderProps {
@@ -21,11 +17,9 @@ export const Header = ({ isLoggedIn, user }: HeaderProps) => {
             // Close the menu
             setAnchorEl(null);
             
-            // Call the logout method from AuthContext
+            // Call the logout method from AuthContext, which will redirect to the logout callback route and login screen
             await logout();
-            
-            // Redirect to the login page
-            window.location.href = '/login';
+
         } catch (error) {            
             // Clear any session storage manually as a fallback
             const storageKeys = Object.keys(sessionStorage);
@@ -92,9 +86,15 @@ export const Header = ({ isLoggedIn, user }: HeaderProps) => {
                     (user && user.profile && user.profile.name ? user.profile.name : 'User Name');
 
     return (
-        <AppBar position="static" color="primary" elevation={4} sx={{ bgcolor: 'primary.dark' }}>
+        <AppBar position="static" color="primary" elevation={4}>
             <Toolbar>
-                <Box display="flex" alignItems="center" sx={{ flexGrow: 1, boxShadow: 'none' }}>
+                <Box display="flex" alignItems="center" sx={{ flexGrow: 1, gap: 1.5 }}>
+                    <Box
+                        component="img"
+                        src="/logo.png"
+                        alt="DMV logo"
+                        sx={{ height: 32, width: 'auto', display: 'block' }}
+                    />
                     <div className="app-title">Department of Motor Vehicles Portal</div>
                 </Box>
 
