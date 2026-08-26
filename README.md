@@ -24,12 +24,18 @@ In your tenant, go to **Security → API access** and create a bootstrap API cli
 
 Note the client ID — you will be prompted for the client secret at deploy time.
 
+### IVIADC license key
+
+An IVIADC license key is required to run the IBM Verify Identity Access Digital Credentials product container. Obtain one from the [IBM Verify trial page](https://isva-trial.verify.ibm.com/) by clicking the **Digital Credentials Code** download button.
+
+You will supply this key during First-Time Setup (see step 3 below).
+
 ### Local tooling
 
 - Docker and Docker Compose
 - Python 3.x
 - `jq`
-- *(OpenShift only)* `oc`, `kubectl`, and an IBM Cloud API key for the container registry
+- *(OpenShift only)* `oc`, `kubectl`, and an IBM Cloud API key for the container registry; the cluster must have egress communication enabled on port 443 to your IBM Verify tenant
 
 ## First-Time Setup
 
@@ -48,7 +54,17 @@ source venv/bin/activate   # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-**3. Build the Docker images**
+**3. Configure the IVIADC license key**
+
+```bash
+cp dc-agency/docker/config/config.template dc-agency/docker/config/config.yaml
+sed -i.bak 's#LICENSE_PLACEHOLDER#<your-license-key>#' dc-agency/docker/config/config.yaml
+rm -f dc-agency/docker/config/config.yaml.bak
+```
+
+This step is required once. The IVIADC product container will not start without a valid license key in `config.yaml`.
+
+**4. Build the Docker images**
 
 ```bash
 ./build.sh
@@ -76,9 +92,22 @@ Local and OpenShift deployments follow the same three-step workflow. The only di
 
 ### OpenShift
 
-Before deploying to OpenShift, push the built images to your container registry:
+Before deploying to OpenShift, create an image pull secret and push the built images to your container registry:
 
 ```bash
+# Create an image pull secret (required once per project)
+./deploy_openshift.sh create-secret \
+    --registry <registry-url> \
+    --docker-username <username> \
+    --docker-password <password> \
+    [project-name]
+# If using icr.io (IBM Cloud Container Registry):
+./deploy_openshift.sh create-secret \
+    --registry icr.io \
+    --docker-username iamapikey \
+    --docker-password <your-ibm-cloud-api-key> \
+    [project-name]
+
 # Push images to registry
 ./deploy_openshift.sh push \
     --registry <registry-url> \
@@ -134,3 +163,12 @@ Possible workarounds:
 - Ensure no other services are occupying ports 8090, 8091, or 8092.
 - For OpenShift, verify you are logged in to your cluster (`oc whoami`) and that the image pull secret exists before deploying.
 - Run `./deploy_locally.sh --help` or `./deploy_openshift.sh --help` for the full flag reference.
+
+## Try It Out
+
+Once deployed, run through the end-to-end demo:
+
+1. Open the **DMV app** (`https://localhost:8090` or your OpenShift route), log in, and issue yourself a digital driver's licence.
+2. Open the **Bank app** (`https://localhost:8091`) and start opening a new account — when prompted, present your digital driver's licence to verify your identity.
+3. Open the **HR portal** (`https://localhost:8092`), log in, and issue yourself an employment credential.
+4. Return to the **Bank app** (`https://localhost:8091`) and apply for a loan using your proof of income/employment credential.
