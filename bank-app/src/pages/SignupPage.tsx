@@ -107,7 +107,7 @@ const SignupPage: React.FC = () => {
     try {
       // Make API call to get verification response
       const data = await diagencyApiService.unauthenticatedRequest(
-        `/credentials/verifiable/presentation/vc`,
+        `/credentials/verifiable/presentation/signup/vc`,
         {
           method: 'GET',
           headers: { 'Content-Type': 'application/json' }
@@ -201,7 +201,7 @@ const SignupPage: React.FC = () => {
       const exchangeId = verificationRequest.exchangeId;
       try {
         const data = await diagencyApiService.unauthenticatedRequest(
-          `/credentials/verifiable/presentation`,
+          `/credentials/verifiable/presentation/signup`,
           {
             method: 'GET',
             headers: { 'Content-Type': 'application/json' },
@@ -268,15 +268,11 @@ const SignupPage: React.FC = () => {
     setVerificationError('');
     
     try {
-      // Make API call to verify identity with driver's license using our API service
-      const data = await diagencyApiService.unauthenticatedRequest('/credentials/verifiable/presentation', {
+      // Make API call to verify identity with driver's licence using our API service.
+      // No body parameters — the server determines the exchange type from the URL path.
+      const data = await diagencyApiService.unauthenticatedRequest('/credentials/verifiable/presentation/signup', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: {
-          with_qr_code: true
-        }
+        headers: { 'Content-Type': 'application/json' },
       });
       
       // Get the exchange ID from the response

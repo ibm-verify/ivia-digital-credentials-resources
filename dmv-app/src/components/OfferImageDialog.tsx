@@ -3,27 +3,13 @@ import CustomDialog from './CustomDialog';
 import vciCredentialService from '../services/VciCredentialService';
 import { Alert, Snackbar } from '@mui/material';
 
-interface UserProfile {
-  firstName: string;
-  lastName: string;
-  email: string;
-  dateOfBirth: string;
-  residentAddress: string;
-  residentCity: string;
-  residentState: string;
-  residentPostalCode: string;
-  residentCountry: string;
-  issuingAuthority: string;
-}
-
 interface OfferImageDialogProps {
   isOpen: boolean;
   handleClose: () => void;
   triggerCreate?: boolean;
-  userProfile: UserProfile
 }
 
-const OfferImageDialog: React.FC<OfferImageDialogProps> = ({ isOpen, handleClose, triggerCreate = false, userProfile }) => {
+const OfferImageDialog: React.FC<OfferImageDialogProps> = ({ isOpen, handleClose, triggerCreate = false }) => {
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [dialogData, setDialogData] = useState<Blob | undefined>(undefined);
   const [walletEngagement, setWalletEngagement] = useState<string>('');
@@ -67,8 +53,8 @@ const OfferImageDialog: React.FC<OfferImageDialogProps> = ({ isOpen, handleClose
       setShowErrorAlert(false);
 
       // Create the offer and fetch the image in one step
-      // The service will handle getting the access token
-      const result = await vciCredentialService.createOfferAndFetchImage(userProfile);
+      // Credential data is assembled server-side; no profile data is sent from the client.
+      const result = await vciCredentialService.createOfferAndFetchImage();
       
       // Set the offer ID and dialog data
       setOfferId(result.id);

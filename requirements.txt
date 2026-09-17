@@ -3,4 +3,5 @@ urllib3==2.7.0
 cryptography==50.0.0
 cbor2==5.9.0
 pycose==1.1.0
+jwcrypto==1.5.6
 playwright==1.59.0

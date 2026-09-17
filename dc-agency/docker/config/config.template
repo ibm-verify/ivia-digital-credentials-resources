@@ -37,7 +37,7 @@ general:
           - name: "my-provider"
             endpoint: "https://iviadcgw:8443/oauth2"
             oid4vci:
-              default_wallet_client_id: "default_oid4vci_wallet"
+              default_wallet_client_id: "default_demo_wallet"
             claims:
             - name: "active"
               value: "true"

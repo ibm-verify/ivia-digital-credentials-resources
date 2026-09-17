@@ -1,20 +1,18 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Alert, Snackbar } from '@mui/material';
 import CustomDialog from './CustomDialog';
-import vciCredentialService, { HrEmploymentProfile } from '../services/VciCredentialService';
+import vciCredentialService from '../services/VciCredentialService';
 
 interface OfferImageDialogProps {
   isOpen: boolean;
   handleClose: () => void;
   triggerCreate?: boolean;
-  userProfile: HrEmploymentProfile;
 }
 
 const OfferImageDialog: React.FC<OfferImageDialogProps> = ({
   isOpen,
   handleClose,
   triggerCreate = false,
-  userProfile,
 }) => {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [dialogData, setDialogData] = useState<Blob | React.ReactNode | null>(null);
@@ -68,7 +66,8 @@ const OfferImageDialog: React.FC<OfferImageDialogProps> = ({
       setIsLoading(true);
 
       await vciCredentialService.initialize();
-      const result = await vciCredentialService.createOfferAndFetchImage(userProfile);
+      // Credential data is assembled server-side; no profile data is sent from the client.
+      const result = await vciCredentialService.createOfferAndFetchImage();
 
       if (!isMountedRef.current) {
         return;

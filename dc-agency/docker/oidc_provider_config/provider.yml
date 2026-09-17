@@ -185,7 +185,7 @@ clients:
       - client_credentials
     scopes:
       - cdr:registration
-  - client_id: default_oid4vci_wallet
+  - client_id: default_demo_wallet
     client_name: OID4VCI Untrusted Wallets
     enabled: true
     grant_types:
@@ -198,7 +198,9 @@ clients:
     act_as_credential_issuer: true
     redirect_uris:
       - openid-credential-offer://
+      - openid-credential-offer://offer
       - openid-credential-wallet://
+      - openid-credential-wallet://wallet
       - openid-credential-offer://callback
       - eudi-openid4ci://authorize
 

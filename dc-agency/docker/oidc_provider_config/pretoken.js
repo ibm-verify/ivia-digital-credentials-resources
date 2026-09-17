@@ -29,7 +29,7 @@ if (grantType === "urn:ietf:params:oauth:grant-type:pre-authorized_code") {
     tokenData["pre-authorized_code"] = preAuthorizedCode;
 }
 
-const excludeAznClientCheck = new Set(["default_oid4vci_wallet"]);
+const excludeAznClientCheck = new Set(["default_demo_wallet"]);
 
 if (!excludeAznClientCheck.has(clientID)) {
 

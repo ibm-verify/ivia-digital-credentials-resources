@@ -34,7 +34,7 @@ services:
       - iviadcop
   iviadc:
     container_name: iviadc
-    image: icr.io/ivia/ivia-digital-credentials:26.07
+    image: icr.io/ivia/ivia-digital-credentials:26.09
     ports:
       - "9720:9720"
     volumes:

@@ -1,7 +1,8 @@
 /**
- * Setup proxy for development server
- * Handles proxying requests to external services
- * ESM version for consistency with bankapp
+ * Bank app server routes
+ * All calls to external services (Diagency, IBM Verify, OIDC) are made with
+ * server-constructed parameters only — no client request headers or bodies
+ * are forwarded to backend services.
  */
 import express from 'express';
 import bodyParser from 'body-parser';
@@ -116,101 +117,49 @@ function sanitizeForLog(str) {
 
 
 /**
- * Forward a request to an external service and handle the response
- * @param {Object} req - Express request object
- * @param {Object} res - Express response object
- * @param {string} targetUrl - URL to forward the request to
- * @param {Object} options - Additional options for the request
+ * Call the Diagency API with server-constructed parameters only.
+ * No req object or client-supplied headers enter this function.
+ * @param {string} method - HTTP method
+ * @param {string} url - Full target URL
+ * @param {string|null} token - Bearer token (null for unauthenticated)
+ * @param {Object|null} body - Request body (only for non-GET/HEAD)
+ * @returns {{ status: number, json?: any, data?: string, buffer?: Buffer }}
  */
-async function callDigitalCredsService(req, targetUrl, options = {}) {
-    let result = {};
-    result.headers = {};
-    try {
-        const isImageRequest = req.headers.accept && req.headers.accept.includes('image/');
-
-        const fetchOptions = {
-            method: req.method,
-            headers: {
-                ...req.headers,
-                ...(options.headers || {}),
-                host: new URL(targetUrl).host
-            },
-            redirect: options.followRedirects ? 'manual' : 'follow'
-        };
-
-        // Add body if present and method supports it
-        if (req.body && req.method !== 'GET' && req.method !== 'HEAD') {
-            if (req.body instanceof URLSearchParams) {
-                fetchOptions.body = req.body;
-            } else if (typeof req.body === 'string') {
-                fetchOptions.body = req.body;
-            } else {
-                fetchOptions.body = JSON.stringify(req.body);
-            }
-        }
-
-        const response = await reliableFetch(targetUrl, fetchOptions, {
-            timeout: options.timeout || 10000,
-            onRetry: (attempt, error) => {
-                console.log(`[BANK-PROXY] Retrying request to ${targetUrl}, attempt ${attempt}. Error: ${error.message}`);
-            }
-        });
-
-        // Forward response status and headers
-        result.status = response.status;
-        response.headers.forEach((value, key) => {
-            // Skip transfer-encoding and content-encoding headers
-            // content-encoding is handled by fetch automatically, so we shouldn't forward it
-            // as the body is already decompressed
-            if (key !== 'transfer-encoding' && key !== 'content-encoding') {
-                result.headers[key] = value;
-            }
-        });
-
-        // For authorization endpoint, check if we need to redirect
-        if (options.followRedirects && response.headers.get('location')) {
-            result.headers["location"] = response.headers.get('location');
-            return result;
-        }
-
-        // Check content type to determine how to handle the response
-        const contentType = response.headers.get('content-type') || '';
-
-        // Send response data based on type
-        if (options.jsonResponse || contentType.includes('application/json')) {
-            result.json = await response.json();
-        } else if (isImageRequest || contentType.includes('image/')) {
-            // For image responses, send the binary data directly
-            const arrayBuffer = await response.arrayBuffer();
-            result.buffer = Buffer.from(arrayBuffer);
-        } else {
-            result.data = await response.text();
-        }
-    } catch (error) {
-        result = handleRequestError(error, options);
+async function callDiagencyApi(method, url, token, body = null) {
+    const headers = {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+    };
+    if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
     }
 
-    return result;
-}
+    const fetchOptions = { method, headers };
 
-/**
- * Handle errors from forwarded requests
- * @param {Error} error - Error object
- * @param {Object} res - Express response object
- * @param {Object} options - Additional options for error handling
- */
-function handleRequestError(error, options = {}) {
-    let result = {};
-    result.headers = {};
+    if (body !== null && method !== 'GET' && method !== 'HEAD') {
+        fetchOptions.body = JSON.stringify(body);
+    }
 
-    // For fetch errors, we don't have a response object
-    result.status = 504;
-    result.json = {
-        error: 'Gateway Timeout',
-        message: error.message || 'No response received from server'
-    };
+    let response;
+    try {
+        response = await reliableFetch(url, fetchOptions, {
+            timeout: 30000,
+            onRetry: (attempt, error) => {
+                console.log(`[BANK-DIAGENCY] Retrying ${method} ${url}, attempt ${attempt}. Error: ${error.message}`);
+            }
+        });
+    } catch (error) {
+        return {
+            status: 504,
+            json: { error: 'Gateway Timeout', message: error.message || 'No response received from Diagency' }
+        };
+    }
 
-    return result;
+    const contentType = response.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) {
+        return { status: response.status, json: await response.json() };
+    }
+    return { status: response.status, data: await response.text() };
 }
 
 // -- OIDC Setup --
@@ -1050,60 +999,30 @@ export default function setupProxy(app) {
         });
     }
 
-    // Helper function to forward authenticated requests to diagency
-    async function preCallDigitalCredsService(req, res, path) {
-        let result = {};
-        try {
-            const targetUrl = `${diagencyAccountUrl}${path}`;
-            const options = { timeout: 30000 };
-
-            // Get the server-side token
-            const token = await getOrRefreshBankToken();
-
-            // Always override any Authorization header with our server-side token
-            const headers = {
-                ...req.headers,
-                'Content-Type': 'application/json'
-            };
-            headers.authorization = `Bearer ${token}`;
-            options.headers = headers;
-
-            result = callDigitalCredsService(req, targetUrl, options);
-        } catch (error) {
-            console.error('Error handling diagency request:', error.message);
-            result.status = 500;
-            result.json = { error: 'Failed to process request' };
-        }
-        return result;
+    /**
+     * Call the Diagency API with a server-side bearer token.
+     * No req object or client-derived values are accepted.
+     * @param {string} method - HTTP method
+     * @param {string} path - Path under diagencyAccountUrl
+     * @param {Object|null} body - Request body (only sent for non-GET/HEAD)
+     * @returns {{ status: number, json?: any, data?: string }}
+     */
+    async function callAuthenticatedDiagencyApi(method, path, body = null) {
+        const token = await getOrRefreshBankToken();
+        const url = `${diagencyAccountUrl}${path}`;
+        return callDiagencyApi(method, url, token, body);
     }
 
-    async function sendDigitalCredsResult(res, result) {
-        if (result.headers && result.headers["location"] !== undefined) {
-            res.redirect(result.headers["location"]);
-            return;
-        }
-
-        Object.entries(result.headers).forEach(([key, value]) => {
-            res.set(key, value);
-        });
-
+    /**
+     * Send a Diagency JSON result to the client.
+     * Only the HTTP status and JSON body are forwarded — no upstream headers.
+     */
+    function sendDiagencyJsonResult(res, result) {
         if (result.json) {
             res.status(result.status).json(result.json);
-            return;
+        } else {
+            res.status(result.status).send(result.data ?? '');
         }
-
-        if (result.data) {
-            res.status(result.status).send(result.data);
-            return;
-        }
-
-        if (result.buffer) {
-            res.status(result.status).send(result.buffer);
-            return;
-        }
-
-        res.send();
-        return;
     }
 
     // Diagency endpoint router with specific allowed paths
@@ -1112,30 +1031,92 @@ export default function setupProxy(app) {
     // For api requests to bank app itself
     const bankApiRouter = express.Router();
 
-    const presentationExchanges = {
-        signup: ['dcRes', 'REACT_APP_EXCHANGE_TEMPLATE_ID'],
-        employment: ['employmentDcRes', 'REACT_APP_HR_EXCHANGE_TEMPLATE_ID']
-    };
+    // Server-side constants that map each VP exchange purpose to its session key and env var.
+    // The client never supplies the purpose — it is baked into the URL path.
+    const SIGNUP_EXCHANGE     = { sessionKey: 'dcRes',           templateEnv: 'REACT_APP_EXCHANGE_TEMPLATE_ID' };
+    const EMPLOYMENT_EXCHANGE = { sessionKey: 'employmentDcRes', templateEnv: 'REACT_APP_HR_EXCHANGE_TEMPLATE_ID' };
 
-    const getPresentationExchange = (req) => {
-        const purpose = req.body?.purpose ?? req.query?.purpose ?? 'signup';
-        const exchange = presentationExchanges[purpose];
-
-        if (!exchange) {
-            const error = new Error(`Unsupported presentation purpose: ${purpose}`);
-            error.status = 400;
-            throw error;
+    /**
+     * Create or replace a VP exchange for the given purpose config.
+     * with_qr_code is always true — a QR code is always required for wallet scanning.
+     */
+    async function createPresentationExchange(req, res, exchangeCfg) {
+        const templateId = process.env[exchangeCfg.templateEnv];
+        if (!templateId) {
+            return res.status(500).json({
+                error: 'Configuration Error',
+                message: `Missing ${exchangeCfg.templateEnv}`
+            });
         }
 
-        const [sessionKey, templateEnv] = exchange;
-        return {
-            sessionKey,
-            templateEnv,
-            templateId: process.env[templateEnv]
-        };
-    };
+        const existingExchangeId = req.session[exchangeCfg.sessionKey]?.json?.id;
+        if (existingExchangeId) {
+            try {
+                await callAuthenticatedDiagencyApi('DELETE', `/v1.0/oidvc/vp/exchange/${existingExchangeId}`);
+            } catch (err) {
+                console.log(`Deleting existing exchange '${existingExchangeId}' failed`);
+                console.error(err);
+            }
+        }
 
-    const verifiedSignupFormData = async (req, res, formData) => {
+        const dcRes = await callAuthenticatedDiagencyApi('POST', '/v1.0/oidvc/vp/exchange', {
+            template_id: templateId,
+            with_qr_code: true,
+        });
+        req.session[exchangeCfg.sessionKey] = dcRes;
+        sendDiagencyJsonResult(res, dcRes);
+    }
+
+    /**
+     * Poll the current state of a VP exchange for the given purpose config.
+     */
+    async function getPresentationExchangeState(req, res, exchangeCfg) {
+        if (!req.session[exchangeCfg.sessionKey]) {
+            return res.status(400).json({
+                error: 'Bad Request',
+                message: 'No active session or exchange not initialized'
+            });
+        }
+
+        const exchangeId = req.session[exchangeCfg.sessionKey].json?.id;
+        if (!exchangeId) {
+            return res.status(400).json({
+                error: 'Bad Request',
+                message: 'Exchange ID not found in session'
+            });
+        }
+
+        const dcRes = await callAuthenticatedDiagencyApi('GET', `/v1.0/oidvc/vp/exchange/${exchangeId}`);
+        req.session[exchangeCfg.sessionKey] = dcRes;
+        sendDiagencyJsonResult(res, dcRes);
+    }
+
+    /**
+     * Fetch the verified credential attributes for a completed VP exchange.
+     */
+    async function getPresentationExchangeVc(req, res, exchangeCfg) {
+        if (!req.session[exchangeCfg.sessionKey]) {
+            return res.status(400).json({
+                error: 'Bad Request',
+                message: 'No active session or exchange not initialized'
+            });
+        }
+
+        const exchangeId = req.session[exchangeCfg.sessionKey].json?.id;
+        if (!exchangeId) {
+            return res.status(400).json({
+                error: 'Bad Request',
+                message: 'Exchange ID not found in session'
+            });
+        }
+
+        const dcRes = await callAuthenticatedDiagencyApi('GET', `/v1.0/diagency/verifications/${exchangeId}`);
+        res.status(dcRes.status).json({
+            attributes: dcRes.json?.oid4vp?.[0]?.decoded?.attributes,
+        });
+    }
+
+    const verifiedSignupFormData = async (req, formData) => {
         const exchangeId = req.session?.dcRes?.json?.id;
         const executionState = req.session?.dcRes?.json?.execution_state;
 
@@ -1145,9 +1126,8 @@ export default function setupProxy(app) {
             throw error;
         }
 
-        const verification = await preCallDigitalCredsService(
-            { method: 'GET', headers: { 'Content-Type': 'application/json' } },
-            res,
+        const verification = await callAuthenticatedDiagencyApi(
+            'GET',
             `/v1.0/diagency/verifications/${exchangeId}`
         );
         const attributes = verification.json?.oid4vp?.[0]?.decoded?.attributes;
@@ -1181,161 +1161,91 @@ export default function setupProxy(app) {
         };
     };
 
-    // POST /verifiable/presentation - Create or get exchange based on session state
-    diagencyRouter.post('/verifiable/presentation', async (req, res) => {
+    // --- Identity verification exchange (signup / DMV driver licence) ---
+    // Purpose is baked into the URL path — client sends no body parameters.
+
+    diagencyRouter.post('/verifiable/presentation/signup', async (req, res) => {
         try {
-            const exchange = getPresentationExchange(req);
-
-            if (!exchange.templateId) {
-                return res.status(500).json({
-                    error: 'Configuration Error',
-                    message: `Missing ${exchange.templateEnv}`
-                });
-            }
-
-            const existingExchangeId = req.session[exchange.sessionKey]?.json?.id;
-            if (existingExchangeId) {
-                const deleteReq = {
-                    method: 'DELETE',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    }
-                };
-
-                try {
-                    await preCallDigitalCredsService(deleteReq, res, `/v1.0/oidvc/vp/exchange/${existingExchangeId}`);
-                } catch (err) {
-                    console.log(`Deleting existing exchange '${existingExchangeId}' failed`);
-                    console.error(err);
-                }
-            }
-
-            const dcReq = {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: {
-                    template_id: exchange.templateId,
-                    with_qr_code: req.body.with_qr_code === true,
-                }
-            };
-
-            const dcRes = await preCallDigitalCredsService(dcReq, res, '/v1.0/oidvc/vp/exchange');
-            req.session[exchange.sessionKey] = dcRes;
-            sendDigitalCredsResult(res, dcRes);
+            await createPresentationExchange(req, res, SIGNUP_EXCHANGE);
         } catch (error) {
-            console.error('Error in POST /verifiable/presentation:', error);
+            console.error('Error in POST /verifiable/presentation/signup:', error);
             res.status(error.status || 500).json({ error: 'Internal Server Error', message: error.message });
         }
     });
 
-    // GET /verifiable/presentation - Get exchange by ID in session
-    diagencyRouter.get('/verifiable/presentation', async (req, res) => {
+    diagencyRouter.get('/verifiable/presentation/signup', async (req, res) => {
         try {
-            const exchange = getPresentationExchange(req);
-
-            // Check if session has dcRes
-            if (!req.session[exchange.sessionKey]) {
-                return res.status(400).json({
-                    error: 'Bad Request',
-                    message: 'No active session or exchange not initialized'
-                });
-            }
-
-            // Get exchange ID from session
-            const exchangeId = req.session[exchange.sessionKey].json?.id;
-
-            if (!exchangeId) {
-                return res.status(400).json({
-                    error: 'Bad Request',
-                    message: 'Exchange ID not found in session'
-                });
-            }
-
-            const dcReq = {
-                method: 'GET',
-                headers: {
-                    'Content-Type': 'application/json',
-                }
-            };
-
-            const dcRes = await preCallDigitalCredsService(dcReq, res, `/v1.0/oidvc/vp/exchange/${exchangeId}`);
-
-            // Update session with new response
-            req.session[exchange.sessionKey] = dcRes;
-
-            // Send response
-            sendDigitalCredsResult(res, dcRes);
+            await getPresentationExchangeState(req, res, SIGNUP_EXCHANGE);
         } catch (error) {
-            console.error('Error in GET /verifiable/presentation:', error);
+            console.error('Error in GET /verifiable/presentation/signup:', error);
             res.status(error.status || 500).json({ error: 'Internal Server Error', message: error.message });
         }
     });
 
-    // GET /verifiable/presentation/vc - Get verification by ID in session
-    diagencyRouter.get('/verifiable/presentation/vc', async (req, res) => {
+    diagencyRouter.get('/verifiable/presentation/signup/vc', async (req, res) => {
         try {
-            const exchange = getPresentationExchange(req);
-
-            // Check if session has dcRes
-            if (!req.session[exchange.sessionKey]) {
-                return res.status(400).json({
-                    error: 'Bad Request',
-                    message: 'No active session or exchange not initialized'
-                });
-            }
-
-            // Get exchange ID from session
-            const exchangeId = req.session[exchange.sessionKey].json?.id;
-
-            if (!exchangeId) {
-                return res.status(400).json({
-                    error: 'Bad Request',
-                    message: 'Exchange ID not found in session'
-                });
-            }
-
-            const dcReq = {
-                method: 'GET',
-                headers: {
-                    'Content-Type': 'application/json',
-                }
-            };
-
-
-            const dcRes = await preCallDigitalCredsService(dcReq, res, `/v1.0/diagency/verifications/${exchangeId}`);
-
-            const resultToSend = {
-                status: dcRes.status,
-                headers: dcRes.headers,
-            }
-
-            resultToSend.json = {
-                attributes: dcRes.json?.oid4vp?.[0]?.decoded?.attributes,
-            };
-
-            // Send response (don't update session for vc endpoint)
-            sendDigitalCredsResult(res, resultToSend);
+            await getPresentationExchangeVc(req, res, SIGNUP_EXCHANGE);
         } catch (error) {
-            console.error('Error in GET /verifiable/presentation/vc:', error);
+            console.error('Error in GET /verifiable/presentation/signup/vc:', error);
             res.status(error.status || 500).json({ error: 'Internal Server Error', message: error.message });
         }
     });
+
+    // --- Employment verification exchange (loan application / HR credential) ---
+    // Purpose is baked into the URL path — client sends no body parameters.
+
+    diagencyRouter.post('/verifiable/presentation/employment', async (req, res) => {
+        try {
+            await createPresentationExchange(req, res, EMPLOYMENT_EXCHANGE);
+        } catch (error) {
+            console.error('Error in POST /verifiable/presentation/employment:', error);
+            res.status(error.status || 500).json({ error: 'Internal Server Error', message: error.message });
+        }
+    });
+
+    diagencyRouter.get('/verifiable/presentation/employment', async (req, res) => {
+        try {
+            await getPresentationExchangeState(req, res, EMPLOYMENT_EXCHANGE);
+        } catch (error) {
+            console.error('Error in GET /verifiable/presentation/employment:', error);
+            res.status(error.status || 500).json({ error: 'Internal Server Error', message: error.message });
+        }
+    });
+
+    diagencyRouter.get('/verifiable/presentation/employment/vc', async (req, res) => {
+        try {
+            await getPresentationExchangeVc(req, res, EMPLOYMENT_EXCHANGE);
+        } catch (error) {
+            console.error('Error in GET /verifiable/presentation/employment/vc:', error);
+            res.status(error.status || 500).json({ error: 'Internal Server Error', message: error.message });
+        }
+    });
+
+    // Allowed account types — client cannot introduce new values.
+    const ALLOWED_ACCOUNT_TYPES = new Set(['savings', 'checking']);
 
     // POST /api/signup - Create a new user in IBM Verify and add to group
     bankApiRouter.post('/signup', async (req, res) => {
         try {
-            const formData = req.body || {};
+            // Extract only the fields this route needs — never spread req.body.
+            const email    = typeof req.body?.email    === 'string' ? req.body.email.trim()    : '';
+            const phone    = typeof req.body?.phone    === 'string' ? req.body.phone.trim().substring(0, 100) : '';
+            const accountType = ALLOWED_ACCOUNT_TYPES.has(req.body?.accountType) ? req.body.accountType : 'savings';
 
-            if (!formData.email || !formData.firstName || !formData.lastName) {
+            // Basic email format check (presence + @ + domain).
+            if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
                 return res.status(400).json({
                     error: 'Bad Request',
-                    message: 'Missing required signup fields'
+                    message: 'A valid email address is required'
                 });
             }
 
-            const verifiedFormData = await verifiedSignupFormData(req, res, formData);
+            // firstName/lastName will be overridden by the verified credential but the
+            // validation below ensures the request is structurally complete before we
+            // attempt the Diagency call.
+            const formData = { email, phone, accountType, firstName: '', lastName: '' };
+
+            const verifiedFormData = await verifiedSignupFormData(req, formData);
             const createdUser = await createIbmVerifyUser(verifiedFormData);
             const group = await addIbmVerifyUserToGroup(createdUser.id, bankUsersGroupName);
 

@@ -8,6 +8,9 @@ import bodyParser from 'body-parser';
 import * as client from 'openid-client';
 import session from 'express-session';
 import crypto from 'crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { reliableFetch, reliableFetchGet, reliableFetchPost } from './reliableFetch.mjs';
 import * as uuid from 'uuid';
 
@@ -105,84 +108,39 @@ function requireValidSession(req, res, next) {
 }
 
 // --- Helper to forward requests ---
-// options.onJson(data) — optional callback invoked with the parsed JSON before it is sent,
-// allowing callers to side-effect (e.g. store an ID in session) without duplicating fetch logic.
-async function forwardRequest(req, res, targetUrl, options = {}) {
+/**
+ * Fetch a QR-code PNG from Diagency and stream it to the client.
+ *
+ * Only server-controlled values are accepted as parameters — the offer ID
+ * comes from the server session and the token from the server's own credential
+ * store.  No client request headers, query parameters, or body are forwarded.
+ * The only header sent to the backend is Authorization; the only header
+ * returned to the client is Content-Type.
+ */
+async function fetchOfferImage(res, token, url) {
     try {
-        console.log(`[DMV-PROXY] Forwarding ${sanitizeForLog(req.method)} request to ${sanitizeForLog(targetUrl)}`);
-        const isImageRequest = req.headers.accept?.includes('image/');
-        const fetchOptions = {
-            method: req.method,
-            headers: { ...req.headers, ...(options.headers || {}), host: new URL(targetUrl).host },
-            redirect: options.followRedirects ? 'manual' : 'follow'
-        };
+        console.log(`[DMV-DIAGENCY] Fetching offer image from Diagency`);
+        const response = await reliableFetch(url, {
+            method: 'GET',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Accept': 'image/png',
+            },
+        }, { timeout: 30000 });
 
-        // Add body if present and method supports it
-        if (req.body && req.method !== 'GET' && req.method !== 'HEAD') {
-            if (req.body instanceof URLSearchParams) {
-                fetchOptions.body = req.body;
-            } else if (typeof req.body === 'string') {
-                fetchOptions.body = req.body;
-            } else {
-                fetchOptions.body = JSON.stringify(req.body);
-                console.log(`[DMV-PROXY] Request body: ${sanitizeForLog(JSON.stringify(req.body))}`);
-            }
+        if (!response.ok) {
+            console.error(`[DMV-DIAGENCY] Offer image fetch failed: ${response.status}`);
+            return res.status(response.status).json({ error: 'Failed to fetch offer image' });
         }
 
-        const response = await reliableFetch(targetUrl, fetchOptions, {
-            timeout: options.timeout ?? 10000,
-            onRetry: (attempt, error) => {
-                console.log(`[DMV-PROXY] Retrying request to ${targetUrl}, attempt ${attempt}. Error: ${error.message}`);
-            }
-        });
-
-        console.log(`[DMV-PROXY] Response status: ${response.status}, Content-Type: ${response.headers.get('content-type')}`);
-
-        res.status(response.status);
-        response.headers.forEach((value, key) => {
-            // Skip transfer-encoding and content-encoding headers
-            // content-encoding is handled by fetch automatically, so we shouldn't forward it
-            // as the body is already decompressed
-            if (key !== 'transfer-encoding' && key !== 'content-encoding') {
-                res.setHeader(key, value);
-            }
-        });
-
-        if (options.followRedirects && response.headers.get('location')) return res.redirect(response.headers.get('location'));
-
-        // Check content type to determine how to handle the response
-        const contentType = response.headers.get('content-type') || '';
-
-        if (options.jsonResponse || contentType.includes('application/json')) {
-            const data = await response.json();
-            if (options.onJson) await options.onJson(data, response.status);
-            if (options.onJson) await new Promise((resolve, reject) =>
-                req.session.save(err => err ? reject(err) : resolve())
-            );
-            console.log(`[DMV-PROXY] Sending JSON response: ${JSON.stringify(data)}`);
-            res.json(data);
-        } else if (isImageRequest || contentType.includes('image/')) {
-            const arrayBuffer = await response.arrayBuffer();
-            console.log(`[DMV-PROXY] Sending image response, size: ${arrayBuffer.byteLength} bytes`);
-            res.send(Buffer.from(arrayBuffer));
-        } else {
-            const text = await response.text();
-            console.log(`[DMV-PROXY] Sending text response: ${text}`);
-            res.send(text);
-        }
+        const arrayBuffer = await response.arrayBuffer();
+        console.log(`[DMV-DIAGENCY] Sending offer image, size: ${arrayBuffer.byteLength} bytes`);
+        res.setHeader('Content-Type', 'image/png');
+        return res.send(Buffer.from(arrayBuffer));
     } catch (error) {
-        console.error(`[DMV-PROXY] Error forwarding request to ${sanitizeForLog(targetUrl)}:`, error);
-        handleRequestError(error, res, options);
+        console.error(`[DMV-DIAGENCY] Error fetching offer image:`, error);
+        return res.status(504).json({ error: 'Gateway Timeout', message: error.message });
     }
-}
-
-function handleRequestError(error, res, options = {}) {
-    // For fetch errors, we don't have a response object
-    console.error(`[DMV-PROXY] Request error:`, error);
-    res.status(504).json({
-        error: 'Gateway Timeout',
-        message: error.message || 'No response received from server'
-    });
 }
 
 // --- DMV Token Helper ---
@@ -249,6 +207,65 @@ async function loadOidcClient() {
     }
     return oidcClient;
 }
+
+// Portrait image used in mDL credentials — loaded from the default profile image at startup.
+// Keeping this server-side ensures the credential image cannot be swapped by the client.
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+let DMV_PORTRAIT = '';
+try {
+    const portraitPath = path.join(__dirname, 'images', 'default-profile-male.jpeg');
+    DMV_PORTRAIT = fs.readFileSync(portraitPath).toString('base64');
+    console.log('[DMV] Default portrait image loaded and base64-encoded successfully');
+} catch (err) {
+    console.error('[DMV] ERROR: Failed to load default portrait image from images/default-profile-male.jpeg —', err.message);
+    console.error('[DMV] Credential offers will be issued with an empty portrait field until this is resolved');
+}
+
+// --- DMV Profile Defaults ---
+const _today = new Date();
+const _expiryDate = new Date(_today);
+_expiryDate.setFullYear(_expiryDate.getFullYear() + 1);
+
+const DMV_PROFILE_DEFAULTS = {
+    id: 'user123',
+    firstName: 'John',
+    lastName: 'Doe',
+    email: 'john.doe@example.com',
+    licenseNumber: 'DL-987654321',
+    licenseClass: 'C',
+    issueDate: _today.toJSON().slice(0, 10),
+    expiryDate: _expiryDate.toJSON().slice(0, 10),
+    address: '123 High Street, Southport, QLD 4217, Australia',
+    dateOfBirth: '1990-01-15',
+    birthPlace: 'VIC, Australia',
+    sex: 'Male (1)',
+    height: 180,
+    weight: 75,
+    eyeColour: 'Hazel',
+    hairColour: 'Brown',
+    ageInYears: 35,
+    birthYear: 1990,
+    nationality: 'AU',
+    ageOver18: true,
+    ageOver21: true,
+    ageOver65: false,
+    residentAddress: '123 High Street, Southport, QLD 4217, Australia',
+    residentCity: 'Gold Coast',
+    residentState: 'QLD',
+    residentPostalCode: '4217',
+    residentCountry: 'AU',
+    administrativeNumber: 'ADM-12345',
+    issuingCountry: 'AU',
+    unDistinguishingSign: 'AU',
+    issuingAuthority: 'Department of Motor Vehicles',
+    issuingJurisdiction: 'Main Roads Australia',
+    drivingPrivileges: [
+        { vehicle_category_code: 'C', issue_date: _today.toJSON().slice(0, 10), expiry_date: _expiryDate.toJSON().slice(0, 10) },
+        { vehicle_category_code: 'RE', issue_date: _today.toJSON().slice(0, 10), expiry_date: _expiryDate.toJSON().slice(0, 10) }
+    ]
+};
 
 // --- Main Export ---
 export default function setupRoutes(app) {
@@ -398,6 +415,19 @@ export default function setupRoutes(app) {
         } else {
             res.json({ authenticated: false });
         }
+    });
+
+    // Return merged profile (OIDC claims override defaults)
+    authRouter.get('/profile', requireValidSession, (req, res) => {
+        const userInfo = req.session.user.userInfo || {};
+        const profile = {
+            ...DMV_PROFILE_DEFAULTS,
+            id: userInfo.sub || DMV_PROFILE_DEFAULTS.id,
+            firstName: userInfo.given_name || DMV_PROFILE_DEFAULTS.firstName,
+            lastName: userInfo.family_name || DMV_PROFILE_DEFAULTS.lastName,
+            email: userInfo.email || DMV_PROFILE_DEFAULTS.email,
+        };
+        return res.json(profile);
     });
 
     // Enhanced logout
@@ -771,22 +801,7 @@ export default function setupRoutes(app) {
 
     app.use('/auth/passkey', passkeyRouter);
 
-    // Helper function to forward authenticated requests to diagency
-    async function forwardAuthenticatedRequest(req, res, path, options = {}) {
-        try {
-            console.log(`[DMV-DIAGENCY] Forwarding authenticated request to path: ${sanitizeForLog(path)}`);
-            const targetUrl = `${diagencyAccountUrl}${path}`;
-            const token = await getOrRefreshDmvToken();
-            console.log(`[DMV-DIAGENCY] Using token: ${token.substring(0, 20)}...`);
-            const headers = { ...req.headers, authorization: `Bearer ${token}` };
-            await forwardRequest(req, res, targetUrl, { ...options, headers, timeout: 30000 });
-        } catch (err) {
-            console.error('[DMV-DIAGENCY] Request error:', err.message, err.stack);
-            res.status(500).json({ error: 'Failed to process request', details: err.message });
-        }
-    }
-
-    // --- Diagency proxy with specific allowed paths ---
+    // --- Diagency routes ---
     const diagencyRouter = express.Router();
 
     // Apply authentication middleware to all diagency routes
@@ -795,16 +810,73 @@ export default function setupRoutes(app) {
     // POST /v1.0/oidvc/vci/offers - Create credential offers
     // The offer ID returned by diagency is stored in the server session so it
     // never needs to be echoed back as a user-controlled URL parameter.
-    diagencyRouter.post('/offers', (req, res) => {
-        console.log('[DMV-DIAGENCY] POST /credentials/offers called');
-        forwardAuthenticatedRequest(req, res, '/v1.0/oidvc/vci/offers', {
-            onJson: (data, status) => {
-                if (status >= 200 && status < 300 && data?.id) {
-                    req.session.currentOfferId = data.id;
-                    console.log(`[DMV-DIAGENCY] Stored offer ID in session: ${sanitizeForLog(data.id)}`);
-                }
+    diagencyRouter.post('/offers', async (req, res) => {
+        console.log('[DMV-DIAGENCY] POST /credentials/offers called — assembling credential_data server-side');
+        try {
+            const userInfo = req.session.user?.userInfo || {};
+            const p = {
+                ...DMV_PROFILE_DEFAULTS,
+                id:        userInfo.sub        || DMV_PROFILE_DEFAULTS.id,
+                firstName: userInfo.given_name || DMV_PROFILE_DEFAULTS.firstName,
+                lastName:  userInfo.family_name || DMV_PROFILE_DEFAULTS.lastName,
+                email:     userInfo.email      || DMV_PROFILE_DEFAULTS.email,
+            };
+
+            const credential_data = {
+                'org.iso.18013.5.1:document_number':   p.licenseNumber,
+                'org.iso.18013.5.1:issue_date':        p.issueDate,
+                'org.iso.18013.5.1:expiry_date':       p.expiryDate,
+                'org.iso.18013.5.1:given_name':        p.firstName,
+                'org.iso.18013.5.1:family_name':       p.lastName,
+                'org.iso.18013.5.1:birth_date':        p.dateOfBirth,
+                'org.iso.18013.5.1:issuing_country':   p.issuingCountry,
+                'org.iso.18013.5.1:issuing_authority': p.issuingAuthority,
+                'org.iso.18013.5.1:portrait':          DMV_PORTRAIT,
+                'org.iso.18013.5.1:driving_privileges':    p.drivingPrivileges,
+                'org.iso.18013.5.1:un_distinguishing_sign': p.issuingCountry,
+                'org.iso.18013.5.1:resident_address':      p.residentAddress,
+                'org.iso.18013.5.1:resident_city':         p.residentCity,
+                'org.iso.18013.5.1:resident_state':        p.residentState,
+                'org.iso.18013.5.1:resident_postal_code':  p.residentPostalCode,
+                'org.iso.18013.5.1:resident_country':      'AU',
+            };
+
+            const payload = {
+                credential_configuration_ids: [process.env.REACT_APP_CREDENTIAL_DEFINITION_ID],
+                credential_data,
+            };
+
+            const token = await getOrRefreshDmvToken();
+            const targetUrl = `${diagencyAccountUrl}/v1.0/oidvc/vci/offers`;
+            const response = await reliableFetch(targetUrl, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json',
+                },
+                body: JSON.stringify(payload),
+            }, { timeout: 30000 });
+
+            const responseText = await response.text();
+            if (!response.ok) {
+                console.error(`[DMV-DIAGENCY] Diagency POST /offers failed: ${response.status} ${responseText}`);
+                return res.status(response.status).json({ error: 'Failed to create credential offer', message: responseText });
             }
-        });
+
+            const data = JSON.parse(responseText);
+            if (data?.id) {
+                req.session.currentOfferId = data.id;
+                await new Promise((resolve, reject) =>
+                    req.session.save(err => err ? reject(err) : resolve())
+                );
+                console.log(`[DMV-DIAGENCY] Stored offer ID in session: ${sanitizeForLog(data.id)}`);
+            }
+            return res.json(data);
+        } catch (err) {
+            console.error('[DMV-DIAGENCY] Error creating credential offer:', err.message);
+            return res.status(500).json({ error: 'Failed to create credential offer', details: err.message });
+        }
     });
 
     // GET /v1.0/oidvc/vci/offers - Get current session offer status or QR code image.
@@ -820,24 +892,37 @@ export default function setupRoutes(app) {
         }
         console.log(`[DMV-DIAGENCY] GET /credentials/offers called, using session offer ID: ${sanitizeForLog(id)}`);
 
-        // Image requests are proxied straight through — no 404 handling needed.
+        // Image requests: fetch from Diagency using server-controlled parameters only.
+        // No client headers or query parameters are forwarded.
         if (req.headers.accept?.includes('image/')) {
-            return forwardAuthenticatedRequest(req, res, `/v1.0/oidvc/vci/offers/${id}`);
+            const token = await getOrRefreshDmvToken();
+            const imageUrl = `${diagencyAccountUrl}/v1.0/oidvc/vci/offers/${id}`;
+            return fetchOfferImage(res, token, imageUrl);
         }
 
         try {
             const token = await getOrRefreshDmvToken();
             const offerUrl = `${diagencyAccountUrl}/v1.0/oidvc/vci/offers/${id}`;
-            const offerRes = await fetch(offerUrl, {
-                headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' }
+            const offerRes = await reliableFetch(offerUrl, {
+                headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' },
+            }, {
+                timeout: 30000,
+                onRetry: (attempt, error) => {
+                    console.log(`[DMV-DIAGENCY] Retrying offer state check, attempt ${attempt}. Error: ${error.message}`);
+                },
             });
 
             if (offerRes.status === 404) {
                 // Offer no longer exists — confirm issuance via the credentials endpoint.
                 console.log(`[DMV-DIAGENCY] Offer ${sanitizeForLog(id)} returned 404 — checking credentials endpoint`);
                 const credUrl = `${diagencyAccountUrl}/v1.0/diagency/credentials?filter=${encodeURIComponent(JSON.stringify({ oid4vci_offer_id: id }))}`;
-                const credRes = await fetch(credUrl, {
-                    headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' }
+                const credRes = await reliableFetch(credUrl, {
+                    headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' },
+                }, {
+                    timeout: 30000,
+                    onRetry: (attempt, error) => {
+                        console.log(`[DMV-DIAGENCY] Retrying credentials lookup, attempt ${attempt}. Error: ${error.message}`);
+                    },
                 });
 
                 if (!credRes.ok) {

@@ -48,45 +48,15 @@ class VciCredentialService {
     return this.definitionId;
   }
 
-  async createCredentialOffer(userProfile: HrEmploymentProfile): Promise<any> {
-    await this.ensureInitialized();
-
-    const credentialDefinitionId = this.getCredentialDefinitionId();
-    if (!credentialDefinitionId) {
-      throw new Error('HR credential definition ID not found.');
-    }
-
-    const namespacePrefix = `${HR_EMPLOYMENT_NAMESPACE}:`;
-    const payload = {
-      credential_configuration_ids: [credentialDefinitionId],
-      credential_data: {
-        [`${namespacePrefix}employee_id`]: userProfile.employeeId,
-        [`${namespacePrefix}document_number`]: userProfile.documentNumber,
-        [`${namespacePrefix}given_name`]: userProfile.firstName,
-        [`${namespacePrefix}family_name`]: userProfile.lastName,
-        [`${namespacePrefix}email`]: userProfile.email,
-        [`${namespacePrefix}employer_name`]: userProfile.employerName,
-        [`${namespacePrefix}employer_entity_id`]: userProfile.employerEntityId,
-        [`${namespacePrefix}job_title`]: userProfile.jobTitle,
-        [`${namespacePrefix}department`]: userProfile.department,
-        [`${namespacePrefix}employment_status`]: userProfile.employmentStatus,
-        [`${namespacePrefix}employment_type`]: userProfile.employmentType,
-        [`${namespacePrefix}start_date`]: userProfile.startDate,
-        [`${namespacePrefix}annual_income`]: userProfile.annualIncome,
-        [`${namespacePrefix}pay_frequency`]: userProfile.payFrequency,
-        [`${namespacePrefix}work_location`]: userProfile.workLocation,
-        [`${namespacePrefix}manager_name`]: userProfile.managerName,
-        [`${namespacePrefix}issuing_authority`]: userProfile.issuingAuthority,
-      },
-    };
-
+  async createCredentialOffer(): Promise<any> {
+    // The server builds the credential_data from session data — send an empty trigger.
     return await diagencyApiService.authenticatedRequest('/credentials/offers', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Accept: 'application/json',
       },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({}),
     });
   }
 
@@ -102,9 +72,9 @@ class VciCredentialService {
     return await response.blob();
   }
 
-  async createOfferAndFetchImage(userProfile: HrEmploymentProfile): Promise<{ id: string; imageBlob: Blob; walletEngagement: string }> {
+  async createOfferAndFetchImage(): Promise<{ id: string; imageBlob: Blob; walletEngagement: string }> {
     // Create the offer — the server stores the ID in the session.
-    const offerResponse = await this.createCredentialOffer(userProfile);
+    const offerResponse = await this.createCredentialOffer();
 
     if (!offerResponse?.id || !offerResponse?.credentialOfferPayload) {
       throw new Error('Invalid response from the HR credential offer API.');

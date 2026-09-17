@@ -3,6 +3,7 @@ import {
   Avatar,
   Box,
   Button,
+  CircularProgress,
   Container,
   Divider,
   Grid,
@@ -10,7 +11,6 @@ import {
   Stack,
   Typography,
 } from '@mui/material';
-import { useAuth } from '../components/AuthProvider';
 import CustomDialog from '../components/CustomDialog';
 import { EmploymentDetails } from '../components/EmploymentDetails';
 import OfferImageDialog from '../components/OfferImageDialog';
@@ -37,47 +37,32 @@ interface EmployeeProfile {
 }
 
 const PortalHomePage: React.FC = () => {
-  const { user } = useAuth();
   const [dialogTitle, setDialogTitle] = useState('');
   const [dialogData, setDialogData] = useState<ReactNode | Blob | null>(null);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isEmploymentOfferDialogOpen, setIsEmploymentOfferDialogOpen] = useState(false);
-  const [employeeProfile, setEmployeeProfile] = useState<EmployeeProfile>({
-    id: 'employee-10017',
-    firstName: 'Mia',
-    lastName: 'Kerr',
-    email: 'mia.kerr@examplecorp.test',
-    employeeId: 'EMP-48217',
-    documentNumber: 'POE-2026-48217',
-    employerName: 'International Business Machines',
-    employerEntityId: 'ABN 12 345 678 901',
-    jobTitle: 'Technical Specialist',
-    department: 'Engineering',
-    employmentStatus: 'Active',
-    employmentType: 'Full-time, permanent',
-    startDate: '2021-07-12',
-    annualIncome: 'AUD 98,400',
-    payFrequency: 'Fortnightly',
-    workLocation: 'Brisbane, QLD',
-    managerName: 'Elena Park',
-    issuingAuthority: 'HR Portal Credential Services',
-  });
+  const [isProfileLoading, setIsProfileLoading] = useState(true);
+  const [employeeProfile, setEmployeeProfile] = useState<EmployeeProfile | null>(null);
 
+  // Fetch the server-authoritative profile on mount
   useEffect(() => {
-    if (!user) {
-      return;
-    }
+    const fetchProfile = async () => {
+      try {
+        const response = await fetch('/auth/profile', { credentials: 'include' });
+        if (!response.ok) {
+          throw new Error(`Failed to fetch profile: ${response.status}`);
+        }
+        const data = await response.json();
+        setEmployeeProfile(data);
+      } catch (error) {
+        console.error('Failed to load employee profile:', error);
+      } finally {
+        setIsProfileLoading(false);
+      }
+    };
 
-    setEmployeeProfile((previous: EmployeeProfile) => ({
-      ...previous,
-      id: user.profile?.sub || previous.id,
-      firstName: user.profile?.given_name || previous.firstName,
-      lastName: user.profile?.family_name || previous.lastName,
-      email: user.profile?.email || previous.email,
-    }));
-  }, [user]);
-
-  const displayName = `${employeeProfile.firstName} ${employeeProfile.lastName}`;
+    fetchProfile();
+  }, []);
 
   const openEmploymentOfferDialog = () => {
     setIsEmploymentOfferDialogOpen(true);
@@ -99,6 +84,20 @@ const PortalHomePage: React.FC = () => {
       </Typography>
     </Box>
   );
+
+  if (isProfileLoading) {
+    return (
+      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh' }}>
+        <CircularProgress />
+      </Box>
+    );
+  }
+
+  if (!employeeProfile) {
+    return null;
+  }
+
+  const displayName = `${employeeProfile.firstName} ${employeeProfile.lastName}`;
 
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: '#f9fafb', py: 8 }}>
@@ -214,7 +213,6 @@ const PortalHomePage: React.FC = () => {
         isOpen={isEmploymentOfferDialogOpen}
         handleClose={() => setIsEmploymentOfferDialogOpen(false)}
         triggerCreate={true}
-        userProfile={employeeProfile}
       />
       <CustomDialog
         maxWidth={'md'}

@@ -16,6 +16,7 @@ import requests
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature
+from jwcrypto import jwk as jw_jwk, jwe as jw_jwe
 from pycose.algorithms import Es256
 from pycose.headers import Algorithm
 from pycose.keys import CoseKey
@@ -23,7 +24,7 @@ from pycose.keys.curves import P256
 from pycose.keys.keyparam import EC2KpCurve, EC2KpD, EC2KpX, EC2KpY, KpAlg, KpKty
 from pycose.keys.keytype import KtyEC2
 from pycose.messages import Sign1Message
-from typing import Callable
+from typing import Callable, Dict, List, Optional
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 ENV_FILE = REPOSITORY_ROOT / ".env"
@@ -153,23 +154,23 @@ class WorkflowSession:
     issuer_app_url: str
     verifier_app_url: str
     dmv_profile: dict
-    hr_app_url: str | None = None
-    hr_profile: dict | None = None
-    issuer_offer: dict | None = None
-    issuer_offers: dict[str, dict] = field(default_factory=dict)
-    verifier_exchange: dict | None = None
-    verifier_exchanges: dict[str, dict] = field(default_factory=dict)
-    bank_signup_status: dict | None = None
-    holder_token_status: dict | None = None
-    holder_credential_status: dict | None = None
-    holder_credential_statuses: dict[str, dict] = field(default_factory=dict)
-    verification_status: dict | None = None
-    verification_statuses: dict[str, dict] = field(default_factory=dict)
-    loan_application_status: dict | None = None
-    holder_debug: dict | None = None
-    completed_steps: list[str] = field(default_factory=list)
-    notes: list[str] = field(default_factory=list)
-    errors: list[str] = field(default_factory=list)
+    hr_app_url: Optional[str] = None
+    hr_profile: Optional[dict] = None
+    issuer_offer: Optional[dict] = None
+    issuer_offers: Dict[str, dict] = field(default_factory=dict)
+    verifier_exchange: Optional[dict] = None
+    verifier_exchanges: Dict[str, dict] = field(default_factory=dict)
+    bank_signup_status: Optional[dict] = None
+    holder_token_status: Optional[dict] = None
+    holder_credential_status: Optional[dict] = None
+    holder_credential_statuses: Dict[str, dict] = field(default_factory=dict)
+    verification_status: Optional[dict] = None
+    verification_statuses: Dict[str, dict] = field(default_factory=dict)
+    loan_application_status: Optional[dict] = None
+    holder_debug: Optional[dict] = None
+    completed_steps: List[str] = field(default_factory=list)
+    notes: List[str] = field(default_factory=list)
+    errors: List[str] = field(default_factory=list)
 
 
 def utc_now():
@@ -493,7 +494,48 @@ class BrowserAuthClient:
         locator = page.locator(selector)
         return locator.first if locator.count() else None
 
+    def _select_cloud_directory_if_needed(self, page):
+        """
+        IBM Verify may show a "Sign in without a password / Passkey" screen where the
+        username/password form is hidden. The sign-in method selector is a Carbon v9
+        <ul id="dropdown-id" class="bx--dropdown" tabindex="0"> component. Clicking the
+        <ul> opens the list; the Cloud Directory option is
+        <a data-ci-key="Cloud Directory" class="bx--dropdown-link id-source-option">.
+        """
+        # Detect the passkey screen: username input present but hidden.
+        username_input = page.locator("input[name='username'], input[id='user-name-input']")
+        if username_input.count() == 0 or username_input.first.is_visible():
+            return  # already on a username/password form, nothing to do
+
+        # Click the Carbon dropdown header to open the sign-in method list.
+        dropdown = page.locator("ul#dropdown-id.bx--dropdown")
+        if dropdown.count() == 0:
+            return  # unexpected page layout — let the normal flow handle it
+
+        dropdown.first.click()
+
+        # Wait for the Cloud Directory option to become visible then click it.
+        cloud_dir = page.locator("a.bx--dropdown-link.id-source-option[data-ci-key='Cloud Directory']")
+        try:
+            cloud_dir.first.wait_for(state="visible", timeout=5_000)
+        except Exception:
+            return  # dropdown did not open — fall through to normal flow
+
+        cloud_dir.first.click()
+
+        # Wait for the username input to become visible before returning.
+        try:
+            page.locator("input[name='username'], input[id='user-name-input']").first.wait_for(
+                state="visible", timeout=5_000
+            )
+        except Exception:
+            pass  # will be retried on the next poll iteration
+
     def _submit_known_credentials(self, page, username_submitted, password_submitted):
+        # If IBM Verify shows the passkey screen, navigate to Cloud Directory first.
+        if not username_submitted and not password_submitted:
+            self._select_cloud_directory_if_needed(page)
+
         password = self._first_visible_locator(page, self.password_selectors)
         username = self._first_visible_locator(page, self.username_selectors)
 
@@ -1017,15 +1059,27 @@ class WalletClient:
         }
 
     @staticmethod
-    def build_openid4vp_handover(client_id, nonce, response_uri):
-        # the handover ties the holder signature to this verifier transaction,
-        # so the presentation cannot be replayed against some other response endpoint.
-        handover_info = [client_id, nonce, None, response_uri]
+    def jwk_sha256_thumbprint(jwk_dict):
+        """Compute the JWK SHA-256 Thumbprint (RFC 7638) for an EC public key.
+
+        For EC keys the required members in lexicographic order are: crv, kty, x, y.
+        Returns raw bytes (32 bytes for SHA-256).
+        """
+        required = {k: jwk_dict[k] for k in ("crv", "kty", "x", "y")}
+        thumbprint_json = json.dumps(required, separators=(",", ":"), sort_keys=True)
+        return hashlib.sha256(thumbprint_json.encode("ascii")).digest()
+
+    @staticmethod
+    def build_openid4vp_handover(client_id, nonce, response_uri, jwk_thumbprint_bytes=None):
+        # Per OID4VP B.2.6.1: OpenID4VPHandoverInfo = [client_id, nonce, jwkThumbprint, response_uri]
+        # jwkThumbprint is the SHA-256 JWK thumbprint (RFC 7638) of the verifier's enc key as a bstr,
+        # or null when the response is not encrypted (legacy direct_post flow).
+        handover_info = [client_id, nonce, jwk_thumbprint_bytes, response_uri]
         handover_hash = hashlib.sha256(cbor2.dumps(handover_info, canonical=True)).digest()
         return ["OpenID4VPHandover", handover_hash]
 
-    def build_session_transcript(self, client_id, nonce, response_uri):
-        return [None, None, self.build_openid4vp_handover(client_id, nonce, response_uri)]
+    def build_session_transcript(self, client_id, nonce, response_uri, jwk_thumbprint_bytes=None):
+        return [None, None, self.build_openid4vp_handover(client_id, nonce, response_uri, jwk_thumbprint_bytes)]
 
     @staticmethod
     def load_wallet_private_key(private_key_pem):
@@ -1046,22 +1100,23 @@ class WalletClient:
             }
         )
 
-    def build_device_authentication_bytes(self, client_id, nonce, response_uri, doc_type, device_namespaces_tag24):
+    def build_device_authentication_bytes(self, client_id, nonce, response_uri, doc_type, device_namespaces_tag24, jwk_thumbprint_bytes=None):
         device_authentication = [
             "DeviceAuthentication",
-            self.build_session_transcript(client_id, nonce, response_uri),
+            self.build_session_transcript(client_id, nonce, response_uri, jwk_thumbprint_bytes),
             doc_type,
             device_namespaces_tag24,
         ]
         return cbor2.dumps(cbor2.CBORTag(24, cbor2.dumps(device_authentication, canonical=True)), canonical=True)
 
-    def build_device_signature(self, private_key_pem, client_id, nonce, response_uri, doc_type, device_namespaces_tag24):
+    def build_device_signature(self, private_key_pem, client_id, nonce, response_uri, doc_type, device_namespaces_tag24, jwk_thumbprint_bytes=None):
         device_authentication_bytes = self.build_device_authentication_bytes(
             client_id,
             nonce,
             response_uri,
             doc_type,
             device_namespaces_tag24,
+            jwk_thumbprint_bytes,
         )
         message = Sign1Message(
             phdr={Algorithm: Es256},
@@ -1089,6 +1144,8 @@ class WalletClient:
             requested_claims,
         )
         device_namespaces_tag24 = self.cbor_tag24({})
+        verifier_enc_jwk = wallet_engagement_params.get("verifier_enc_jwk")
+        jwk_thumbprint_bytes = self.jwk_sha256_thumbprint(verifier_enc_jwk) if verifier_enc_jwk else None
         device_signature = self.build_device_signature(
             private_key_pem,
             client_id,
@@ -1096,6 +1153,7 @@ class WalletClient:
             response_uri,
             doc_type,
             device_namespaces_tag24,
+            jwk_thumbprint_bytes,
         )
 
         device_response = {
@@ -1200,30 +1258,277 @@ class WalletClient:
 
         return selected_credential_key, self._credentials[selected_credential_key]
 
+    @staticmethod
+    def generate_enc_keypair():
+        """Generate an ephemeral P-256 JWK pair used to receive the encrypted JAR response."""
+        private_key = jw_jwk.JWK.generate(kty="EC", crv="P-256", use="enc")
+        private_jwk = json.loads(private_key.export(private_key=True))
+        public_jwk = json.loads(private_key.export(private_key=False))
+        private_jwk["kid"] = "walletkey_P-256-enc"
+        public_jwk["kid"] = "walletkey_P-256-enc"
+        return private_jwk, public_jwk
+
+    def _fetch_verifier_root_cert_pem(self, jar_uri):
+        """Fetch the verifier agent's root CA certificate from the public trust anchor JWKS endpoint.
+
+        The jar_uri path contains the agent ID:
+          .../jar/<agent_id>/...
+        The public JWKS endpoint (no auth required) is:
+          <agency_base>/diagency/v1.0/diagency/trust/anchor/<agent_id>/.well-known/jwks.json
+        and returns a standard JWKS document whose keys carry an x5c array of base64-encoded DER certs.
+        x5c[0] is the leaf/root cert; we decode it as DER and convert to PEM.
+        """
+        from cryptography.hazmat.primitives.serialization import Encoding
+
+        # Extract agent_id: the segment after "jar/" in the path.
+        parsed = urlparse(jar_uri)
+        path_parts = parsed.path.split("/")
+        try:
+            jar_idx = path_parts.index("jar")
+            agent_id = path_parts[jar_idx + 1]
+        except (ValueError, IndexError):
+            raise RuntimeError(f"Cannot parse agent_id from JAR URI path: {parsed.path!r}")
+
+        # path looks like /diagency/v1.0/oidvc/vp/exchange/public/jar/<agent_id>/...
+        # The trust anchor base is scheme://host[:port]/diagency/v1.0/diagency
+        agency_base = f"{parsed.scheme}://{parsed.netloc}"
+        jwks_url = f"{agency_base}/diagency/v1.0/diagency/trust/anchor/{agent_id}/.well-known/jwks.json"
+
+        print(f"[bypassqr] Fetching verifier root cert JWKS from: {jwks_url}")
+        response = self.session.get(jwks_url, timeout=30)
+        if response.status_code != 200:
+            raise RuntimeError(
+                f"Trust anchor JWKS endpoint returned {response.status_code} for agent {agent_id}: {response.text[:200]}"
+            )
+        jwks = response.json()
+        keys = jwks.get("keys", [])
+
+        # Find the first key that has an x5c array — that's the root of trust certificate.
+        x5c_b64 = None
+        for key in keys:
+            x5c = key.get("x5c")
+            if x5c and len(x5c) > 0:
+                x5c_b64 = x5c[0]
+                break
+        if not x5c_b64:
+            raise RuntimeError(
+                f"Trust anchor JWKS for agent {agent_id} did not include any key with an x5c certificate."
+            )
+
+        # x5c values are base64-encoded DER (not base64url, not PEM).
+        from cryptography import x509 as _x509
+        root_der = base64.b64decode(x5c_b64)
+        root_cert = _x509.load_der_x509_certificate(root_der)
+        root_cert_pem = root_cert.public_bytes(Encoding.PEM).decode("utf-8")
+        print(f"[bypassqr] Retrieved verifier root cert: subject={root_cert.subject!r}")
+        return root_cert_pem
+
+    @staticmethod
+    def _verify_jar_jwt_x5c(signed_jwt_compact, root_cert_pem):
+        """Verify the JAR JWT's x5c chain against the known verifier root cert and return the payload dict.
+
+        Steps (matching the autotest's verify_jwt_x5c_and_alg):
+          1. Decode the JWT header to extract the x5c cert chain.
+          2. Load the leaf cert (x5c[0]) and verify its signature with the root cert's public key.
+          3. Verify the JWT signature with the leaf cert's public key.
+          4. Return the decoded payload.
+        """
+        from cryptography import x509
+        from cryptography.hazmat.primitives.asymmetric.ec import ECDSA
+        from cryptography.hazmat.primitives.asymmetric.utils import encode_dss_signature
+        from cryptography.exceptions import InvalidSignature
+
+        parts = signed_jwt_compact.split(".")
+        if len(parts) != 3:
+            raise RuntimeError("JAR response is not a compact JWS (expected 3 dot-separated parts).")
+
+        def _b64url_decode(s):
+            padding = (4 - len(s) % 4) % 4
+            return base64.urlsafe_b64decode(s + "=" * padding)
+
+        header = json.loads(_b64url_decode(parts[0]))
+        payload_bytes = _b64url_decode(parts[1])
+
+        print(f"[bypassqr] JAR JWT header alg={header.get('alg')!r} typ={header.get('typ')!r}, "
+              f"x5c chain length={len(header.get('x5c', []))}")
+
+        x5c_chain = header.get("x5c")
+        if not x5c_chain:
+            raise RuntimeError("JAR JWT header does not contain an x5c certificate chain.")
+        if header.get("alg") != "ES256":
+            raise RuntimeError(f"JAR JWT uses unexpected alg {header.get('alg')!r}; expected ES256.")
+
+        # Load the leaf cert from x5c[0] (base64-encoded DER, no PEM armour).
+        leaf_der = base64.b64decode(x5c_chain[0])
+        leaf_cert = x509.load_der_x509_certificate(leaf_der)
+
+        # Load the root cert from the trust anchor (PEM).
+        root_cert = x509.load_pem_x509_certificate(root_cert_pem.encode("utf-8"))
+
+        # Verify leaf cert is signed by the root.
+        try:
+            root_cert.public_key().verify(
+                leaf_cert.signature,
+                leaf_cert.tbs_certificate_bytes,
+                ECDSA(leaf_cert.signature_hash_algorithm),
+            )
+            print("[bypassqr] Leaf cert signature verified against verifier root cert — OK")
+        except InvalidSignature:
+            raise RuntimeError("JAR JWT leaf certificate was NOT signed by the known verifier root CA.")
+
+        # Verify the JWT signature using the leaf cert's public key.
+        signing_input = f"{parts[0]}.{parts[1]}".encode("ascii")
+        raw_signature = _b64url_decode(parts[2])
+        # JWT ES256 signature is raw (r || s), 64 bytes. cryptography needs DER.
+        r = int.from_bytes(raw_signature[:32], "big")
+        s = int.from_bytes(raw_signature[32:], "big")
+        der_signature = encode_dss_signature(r, s)
+        try:
+            leaf_cert.public_key().verify(der_signature, signing_input, ECDSA(hashes.SHA256()))
+            print("[bypassqr] JAR JWT signature verified against leaf cert public key — OK")
+        except InvalidSignature:
+            raise RuntimeError("JAR JWT signature verification failed against the leaf certificate public key.")
+
+        return json.loads(payload_bytes)
+
+    def fetch_jar_request(self, jar_uri, wallet_engagement_params):
+        """POST wallet_metadata to the JAR endpoint, decrypt the JWE, verify the x5c JWT, return the payload."""
+        private_enc_jwk, public_enc_jwk = self.generate_enc_keypair()
+
+        # Fetch the verifier's root CA cert from the public trust anchor endpoint.
+        root_cert_pem = self._fetch_verifier_root_cert_pem(jar_uri)
+
+        # The JAR endpoint expects form-encoded wallet_metadata[jwks][keys][0][...] fields.
+        form_data = {
+            "wallet_metadata[vp_formats_supported][mso_mdoc][deviceauth_alg_values][0]": "-9",
+            "wallet_metadata[vp_formats_supported][mso_mdoc][issuerauth_alg_values][0]": "-9",
+            "wallet_metadata[jwks][keys][0][kty]": public_enc_jwk["kty"],
+            "wallet_metadata[jwks][keys][0][crv]": public_enc_jwk["crv"],
+            "wallet_metadata[jwks][keys][0][x]": public_enc_jwk["x"],
+            "wallet_metadata[jwks][keys][0][y]": public_enc_jwk["y"],
+            "wallet_metadata[jwks][keys][0][kid]": public_enc_jwk["kid"],
+            "wallet_metadata[jwks][keys][0][use]": "enc",
+        }
+        print(f"[bypassqr] Posting wallet_metadata to JAR endpoint: {jar_uri}")
+        response = self.session.post(
+            jar_uri,
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            data=form_data,
+            timeout=30,
+        )
+        if response.status_code != 200:
+            raise RuntimeError(f"JAR endpoint returned {response.status_code}: {response.text[:200]}")
+        print(f"[bypassqr] JAR endpoint returned {response.status_code}, body length={len(response.text)}")
+
+        # The server returns a JWE wrapping the signed request JWT.
+        print("[bypassqr] Decrypting JWE response from JAR endpoint...")
+        jwe_token = jw_jwe.JWE()
+        jwe_token.deserialize(response.text.strip(), key=jw_jwk.JWK(**private_enc_jwk))
+        signed_jwt_compact = jwe_token.payload.decode("utf-8")
+        print(f"[bypassqr] Decrypted signed JWT compact length={len(signed_jwt_compact)}")
+
+        # Verify the x5c chain and JWT signature, then return the payload.
+        print("[bypassqr] Verifying JAR JWT x5c chain and signature...")
+        payload = self._verify_jar_jwt_x5c(signed_jwt_compact, root_cert_pem)
+        print(f"[bypassqr] JAR JWT verified. client_id={payload.get('client_id')!r} "
+              f"nonce={payload.get('nonce')!r} response_uri={payload.get('response_uri')!r}")
+        return payload
+
+    @staticmethod
+    def encrypt_vp_response(vp_token_payload, verifier_state, enc_public_jwk_dict):
+        """Encrypt {state, vp_token} as a JWE for direct_post.jwt submission."""
+        plaintext = json.dumps(
+            {"state": verifier_state, "vp_token": vp_token_payload},
+            separators=(",", ":"),
+        ).encode("utf-8")
+        verifier_key = jw_jwk.JWK(**enc_public_jwk_dict)
+        protected = {"alg": "ECDH-ES", "enc": "A128GCM", "kid": enc_public_jwk_dict.get("kid", "")}
+        jwe_token = jw_jwe.JWE(plaintext, protected=json.dumps(protected))
+        jwe_token.add_recipient(verifier_key)
+        return jwe_token.serialize(compact=True)
+
     def present_credential(self, wallet_engagement_url, credential_key=None):
         # wallet entry point 2: the only input is what the verifier QR/deep link gives the mobile wallet.
         selected_credential_key, stored_credential = self.get_stored_credential(credential_key)
 
+        print(f"[bypassqr] present_credential: wallet_engagement_url={wallet_engagement_url!r}")
         wallet_engagement_params = parse_uri_query(wallet_engagement_url)
-        response_uri = wallet_engagement_params.get("response_uri")
-        verifier_state = wallet_engagement_params.get("state")
-        if not response_uri or not verifier_state:
-            raise RuntimeError("The verifier wallet engagement is missing the response_uri or state needed for direct_post submission.")
+        request_uri = wallet_engagement_params.get("request_uri")
+        print(f"[bypassqr] present_credential: request_uri={request_uri!r}, "
+              f"client_id={wallet_engagement_params.get('client_id')!r}")
 
-        vp_token_payload = self.build_mdoc_device_response(
-            stored_credential.issued_credential,
-            stored_credential.private_key_pem,
-            wallet_engagement_params,
-        )
-        response = self.session.post(
-            response_uri,
-            headers={"Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json"},
-            data={
-                "state": verifier_state,
-                "vp_token": json.dumps(vp_token_payload, separators=(",", ":")),
-            },
-            timeout=30,
-        )
+        if request_uri:
+            # by_reference_jwt + direct_post.jwt flow:
+            # 1. POST wallet metadata to the JAR endpoint to obtain the encrypted request object.
+            # 2. Decrypt the JWE and verify the signed JWT (x5c chain + signature) to get the authorize_request.
+            # 3. Build the mdoc device response using the verified params.
+            # 4. Encrypt the VP response with the verifier's enc key and POST as "response=<JWE>".
+            authorize_request = self.fetch_jar_request(request_uri, wallet_engagement_params)
+            client_id = authorize_request.get("client_id")
+            nonce = authorize_request.get("nonce")
+            response_uri = authorize_request.get("response_uri")
+            verifier_state = authorize_request.get("state")
+            if not client_id or not nonce or not response_uri or not verifier_state:
+                raise RuntimeError(
+                    "The decrypted JAR request is missing client_id, nonce, response_uri, or state."
+                )
+            # Extract the verifier's encryption key from client_metadata.jwks.
+            enc_keys = (
+                authorize_request.get("client_metadata", {})
+                .get("jwks", {})
+                .get("keys", [])
+            )
+            verifier_enc_jwk = next(
+                (k for k in enc_keys if k.get("use") == "enc"),
+                None,
+            )
+            if not verifier_enc_jwk:
+                raise RuntimeError("The JAR client_metadata did not include an enc key for response encryption.")
+            # Merge all needed params so build_mdoc_device_response can find them.
+            # verifier_enc_jwk is included so the handover JWK thumbprint can be computed.
+            wallet_engagement_params = dict(wallet_engagement_params)
+            wallet_engagement_params["client_id"] = client_id
+            wallet_engagement_params["nonce"] = nonce
+            wallet_engagement_params["response_uri"] = response_uri
+            wallet_engagement_params["dcql_query"] = authorize_request.get("dcql_query")
+            wallet_engagement_params["verifier_enc_jwk"] = verifier_enc_jwk
+            vp_token_payload = self.build_mdoc_device_response(
+                stored_credential.issued_credential,
+                stored_credential.private_key_pem,
+                wallet_engagement_params,
+            )
+            encrypted_response = self.encrypt_vp_response(vp_token_payload, verifier_state, verifier_enc_jwk)
+            print(f"[bypassqr] Posting encrypted VP response to response_uri={response_uri!r}")
+            response = self.session.post(
+                response_uri,
+                headers={"Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json"},
+                data={"response": encrypted_response},
+                timeout=30,
+            )
+        else:
+            # Legacy by_value_params + direct_post flow: all params are inline in the engagement URL.
+            response_uri = wallet_engagement_params.get("response_uri")
+            verifier_state = wallet_engagement_params.get("state")
+            if not response_uri or not verifier_state:
+                raise RuntimeError(
+                    "The verifier wallet engagement is missing the response_uri or state needed for direct_post submission."
+                )
+            vp_token_payload = self.build_mdoc_device_response(
+                stored_credential.issued_credential,
+                stored_credential.private_key_pem,
+                wallet_engagement_params,
+            )
+            response = self.session.post(
+                response_uri,
+                headers={"Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json"},
+                data={
+                    "state": verifier_state,
+                    "vp_token": json.dumps(vp_token_payload, separators=(",", ":")),
+                },
+                timeout=30,
+            )
+
+        print(f"[bypassqr] VP response POST status={response.status_code}")
         self.presentation_status = {
             "completed": False,
             "message": "Submitted a real mso_mdoc holder presentation to the verifier response_uri.",
@@ -1245,10 +1550,10 @@ class VerifierClient:
 
     def start_verification_exchange(self, with_qr_code, purpose=BANK_SIGNUP_PURPOSE):
         # ask the verifier app to create a real exchange for us.
+        # purpose is encoded in the URL path — no body parameters needed.
         response = self.session.post(
-            f"{self.verifier_app_url}/credentials/verifiable/presentation",
+            f"{self.verifier_app_url}/credentials/verifiable/presentation/{purpose}",
             headers={"Content-Type": "application/json"},
-            data=compact_json_body({"with_qr_code": with_qr_code, "purpose": purpose}),
             timeout=30,
         )
         require_ok(response, "Start verifier exchange")
@@ -1256,9 +1561,9 @@ class VerifierClient:
 
     def get_verification_exchange(self, purpose=BANK_SIGNUP_PURPOSE):
         # poll the verifier app for the current exchange state.
+        # purpose is encoded in the URL path — no query parameters needed.
         response = self.session.get(
-            f"{self.verifier_app_url}/credentials/verifiable/presentation",
-            params={"purpose": purpose},
+            f"{self.verifier_app_url}/credentials/verifiable/presentation/{purpose}",
             timeout=30,
         )
         require_ok(response, "Get verifier exchange")
@@ -1266,9 +1571,9 @@ class VerifierClient:
 
     def get_verification_attributes(self, purpose=BANK_SIGNUP_PURPOSE):
         # once the verifier succeeds, the app exposes the verified attributes through this helper route.
+        # purpose is encoded in the URL path — no query parameters needed.
         response = self.session.get(
-            f"{self.verifier_app_url}/credentials/verifiable/presentation/vc",
-            params={"purpose": purpose},
+            f"{self.verifier_app_url}/credentials/verifiable/presentation/{purpose}/vc",
             timeout=30,
         )
         require_ok(response, "Get verifier attributes")

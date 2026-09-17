@@ -97,78 +97,39 @@ function requireValidSession(req, res, next) {
 }
 
 // --- Helper to forward requests ---
-// options.onJson(data, status) — optional callback invoked with the parsed JSON before it is sent,
-// allowing callers to side-effect (e.g. store an ID in session) without duplicating fetch logic.
-async function forwardRequest(req, res, targetUrl, options = {}) {
+/**
+ * Fetch a QR-code PNG from Diagency and stream it to the client.
+ *
+ * Only server-controlled values are accepted as parameters — the offer ID
+ * comes from the server session and the token from the server's own credential
+ * store.  No client request headers, query parameters, or body are forwarded.
+ * The only header sent to the backend is Authorization; the only header
+ * returned to the client is Content-Type.
+ */
+async function fetchOfferImage(res, token, url) {
     try {
-        console.log(`[HR-PROXY] Forwarding ${sanitizeForLog(req.method)} request to ${sanitizeForLog(targetUrl)}`);
-        const isImageRequest = req.headers.accept?.includes('image/');
-        const fetchOptions = {
-            method: req.method,
-            headers: { ...req.headers, ...(options.headers || {}), host: new URL(targetUrl).host },
-            redirect: options.followRedirects ? 'manual' : 'follow'
-        };
+        console.log(`[HR-DIAGENCY] Fetching offer image from Diagency`);
+        const response = await reliableFetch(url, {
+            method: 'GET',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Accept': 'image/png',
+            },
+        }, { timeout: 30000 });
 
-        if (req.body && req.method !== 'GET' && req.method !== 'HEAD') {
-            if (req.body instanceof URLSearchParams) {
-                fetchOptions.body = req.body;
-            } else if (typeof req.body === 'string') {
-                fetchOptions.body = req.body;
-            } else {
-                fetchOptions.body = JSON.stringify(req.body);
-                console.log(`[HR-PROXY] Request body: ${sanitizeForLog(JSON.stringify(req.body))}`);
-            }
+        if (!response.ok) {
+            console.error(`[HR-DIAGENCY] Offer image fetch failed: ${response.status}`);
+            return res.status(response.status).json({ error: 'Failed to fetch offer image' });
         }
 
-        const response = await reliableFetch(targetUrl, fetchOptions, {
-            timeout: options.timeout ?? 10000,
-            onRetry: (attempt, error) => {
-                console.log(`[HR-PROXY] Retrying request to ${targetUrl}, attempt ${attempt}. Error: ${error.message}`);
-            }
-        });
-
-        console.log(`[HR-PROXY] Response status: ${response.status}, Content-Type: ${response.headers.get('content-type')}`);
-
-        res.status(response.status);
-        response.headers.forEach((value, key) => {
-            if (key !== 'transfer-encoding' && key !== 'content-encoding') {
-                res.setHeader(key, value);
-            }
-        });
-
-        if (options.followRedirects && response.headers.get('location')) return res.redirect(response.headers.get('location'));
-
-        const contentType = response.headers.get('content-type') || '';
-
-        if (options.jsonResponse || contentType.includes('application/json')) {
-            const data = await response.json();
-            if (options.onJson) await options.onJson(data, response.status);
-            if (options.onJson) await new Promise((resolve, reject) =>
-                req.session.save(err => err ? reject(err) : resolve())
-            );
-            console.log(`[HR-PROXY] Sending JSON response: ${JSON.stringify(data)}`);
-            res.json(data);
-        } else if (isImageRequest || contentType.includes('image/')) {
-            const arrayBuffer = await response.arrayBuffer();
-            console.log(`[HR-PROXY] Sending image response, size: ${arrayBuffer.byteLength} bytes`);
-            res.send(Buffer.from(arrayBuffer));
-        } else {
-            const text = await response.text();
-            console.log(`[HR-PROXY] Sending text response: ${text}`);
-            res.send(text);
-        }
+        const arrayBuffer = await response.arrayBuffer();
+        console.log(`[HR-DIAGENCY] Sending offer image, size: ${arrayBuffer.byteLength} bytes`);
+        res.setHeader('Content-Type', 'image/png');
+        return res.send(Buffer.from(arrayBuffer));
     } catch (error) {
-        console.error(`[HR-PROXY] Error forwarding request to ${sanitizeForLog(targetUrl)}:`, error);
-        handleRequestError(error, res, options);
+        console.error(`[HR-DIAGENCY] Error fetching offer image:`, error);
+        return res.status(504).json({ error: 'Gateway Timeout', message: error.message });
     }
-}
-
-function handleRequestError(error, res, options = {}) {
-    console.error('[HR-PROXY] Request error:', error);
-    res.status(504).json({
-        error: 'Gateway Timeout',
-        message: error.message || 'No response received from server'
-    });
 }
 
 // --- HR Token Helper ---
@@ -233,6 +194,28 @@ async function loadOidcClient() {
     }
     return oidcClient;
 }
+
+// --- HR Profile Defaults (server-side constants for credential issuance) ---
+const HR_PROFILE_DEFAULTS = {
+    id: 'employee-10017',
+    firstName: 'Mia',
+    lastName: 'Kerr',
+    email: 'mia.kerr@examplecorp.test',
+    employeeId: 'EMP-48217',
+    documentNumber: 'POE-2026-48217',
+    employerName: 'International Business Machines',
+    employerEntityId: 'ABN 12 345 678 901',
+    jobTitle: 'Technical Specialist',
+    department: 'Engineering',
+    employmentStatus: 'Active',
+    employmentType: 'Full-time, permanent',
+    startDate: '2021-07-12',
+    annualIncome: 'AUD 98,400',
+    payFrequency: 'Fortnightly',
+    workLocation: 'Brisbane, QLD',
+    managerName: 'Elena Park',
+    issuingAuthority: 'HR Portal Credential Services',
+};
 
 // --- Main Export ---
 export default function setupRoutes(app) {
@@ -371,6 +354,18 @@ export default function setupRoutes(app) {
         }
     });
 
+    authRouter.get('/profile', requireValidSession, (req, res) => {
+        const userInfo = req.session.user.userInfo || {};
+        const profile = {
+            ...HR_PROFILE_DEFAULTS,
+            id: userInfo.sub || HR_PROFILE_DEFAULTS.id,
+            firstName: userInfo.given_name || HR_PROFILE_DEFAULTS.firstName,
+            lastName: userInfo.family_name || HR_PROFILE_DEFAULTS.lastName,
+            email: userInfo.email || HR_PROFILE_DEFAULTS.email,
+        };
+        return res.json(profile);
+    });
+
     authRouter.post('/logout', async (req, res) => {
         try {
             let logoutUrl = null;
@@ -413,37 +408,84 @@ export default function setupRoutes(app) {
 
     app.use('/auth', authRouter);
 
-    async function forwardAuthenticatedRequest(req, res, path, options = {}) {
-        try {
-            console.log(`[HR-DIAGENCY] Forwarding authenticated request to path: ${sanitizeForLog(path)}`);
-            const targetUrl = `${diagencyAccountUrl}${path}`;
-            const token = await getOrRefreshHrToken();
-            console.log(`[HR-DIAGENCY] Using token: ${token.substring(0, 20)}...`);
-            const headers = { ...req.headers, authorization: `Bearer ${token}` };
-            await forwardRequest(req, res, targetUrl, { ...options, headers, timeout: 30000 });
-        } catch (err) {
-            console.error('[HR-DIAGENCY] Request error:', err.message, err.stack);
-            res.status(500).json({ error: 'Failed to process request', details: err.message });
-        }
-    }
-
     const diagencyRouter = express.Router();
 
     diagencyRouter.use(requireValidSession);
 
     // POST /v1.0/oidvc/vci/offers - Create credential offers
+    // Credential data is assembled server-side from the session and HR_PROFILE_DEFAULTS.
+    // The client POST body is ignored — the credential values cannot be supplied by the client.
     // The offer ID returned by diagency is stored in the server session so it
     // never needs to be echoed back as a user-controlled URL parameter.
-    diagencyRouter.post('/offers', (req, res) => {
-        console.log('[HR-DIAGENCY] POST /credentials/offers called');
-        forwardAuthenticatedRequest(req, res, '/v1.0/oidvc/vci/offers', {
-            onJson: (data, status) => {
-                if (status >= 200 && status < 300 && data?.id) {
-                    req.session.currentOfferId = data.id;
-                    console.log(`[HR-DIAGENCY] Stored offer ID in session: ${sanitizeForLog(data.id)}`);
-                }
+    diagencyRouter.post('/offers', async (req, res) => {
+        console.log('[HR-DIAGENCY] POST /credentials/offers called — assembling credential_data server-side');
+        try {
+            const userInfo = req.session.user?.userInfo || {};
+            const p = {
+                ...HR_PROFILE_DEFAULTS,
+                id:        userInfo.sub         || HR_PROFILE_DEFAULTS.id,
+                firstName: userInfo.given_name  || HR_PROFILE_DEFAULTS.firstName,
+                lastName:  userInfo.family_name || HR_PROFILE_DEFAULTS.lastName,
+                email:     userInfo.email       || HR_PROFILE_DEFAULTS.email,
+            };
+
+            const NS = 'com.example.hr.portal.1:';
+            const credential_data = {
+                [`${NS}employee_id`]:       p.employeeId,
+                [`${NS}document_number`]:   p.documentNumber,
+                [`${NS}given_name`]:        p.firstName,
+                [`${NS}family_name`]:       p.lastName,
+                [`${NS}email`]:             p.email,
+                [`${NS}employer_name`]:     p.employerName,
+                [`${NS}employer_entity_id`]: p.employerEntityId,
+                [`${NS}job_title`]:         p.jobTitle,
+                [`${NS}department`]:        p.department,
+                [`${NS}employment_status`]: p.employmentStatus,
+                [`${NS}employment_type`]:   p.employmentType,
+                [`${NS}start_date`]:        p.startDate,
+                [`${NS}annual_income`]:     p.annualIncome,
+                [`${NS}pay_frequency`]:     p.payFrequency,
+                [`${NS}work_location`]:     p.workLocation,
+                [`${NS}manager_name`]:      p.managerName,
+                [`${NS}issuing_authority`]: p.issuingAuthority,
+            };
+
+            const payload = {
+                credential_configuration_ids: [process.env.REACT_APP_HR_CREDENTIAL_DEFINITION_ID],
+                credential_data,
+            };
+
+            const token = await getOrRefreshHrToken();
+            const targetUrl = `${diagencyAccountUrl}/v1.0/oidvc/vci/offers`;
+            const response = await reliableFetch(targetUrl, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json',
+                },
+                body: JSON.stringify(payload),
+            }, { timeout: 30000 });
+
+            const responseText = await response.text();
+            if (!response.ok) {
+                console.error(`[HR-DIAGENCY] Diagency POST /offers failed: ${response.status} ${responseText}`);
+                return res.status(response.status).json({ error: 'Failed to create credential offer', message: responseText });
             }
-        });
+
+            const data = JSON.parse(responseText);
+            if (data?.id) {
+                req.session.currentOfferId = data.id;
+                await new Promise((resolve, reject) =>
+                    req.session.save(err => err ? reject(err) : resolve())
+                );
+                console.log(`[HR-DIAGENCY] Stored offer ID in session: ${sanitizeForLog(data.id)}`);
+            }
+            return res.json(data);
+        } catch (err) {
+            console.error('[HR-DIAGENCY] Error creating credential offer:', err.message);
+            return res.status(500).json({ error: 'Failed to create credential offer', details: err.message });
+        }
     });
 
     // GET /v1.0/oidvc/vci/offers - Get current session offer status or QR code image.
@@ -459,24 +501,37 @@ export default function setupRoutes(app) {
         }
         console.log(`[HR-DIAGENCY] GET /credentials/offers called, using session offer ID: ${sanitizeForLog(id)}`);
 
-        // Image requests are proxied straight through — no 404 handling needed.
+        // Image requests: fetch from Diagency using server-controlled parameters only.
+        // No client headers or query parameters are forwarded.
         if (req.headers.accept?.includes('image/')) {
-            return forwardAuthenticatedRequest(req, res, `/v1.0/oidvc/vci/offers/${id}`);
+            const token = await getOrRefreshHrToken();
+            const imageUrl = `${diagencyAccountUrl}/v1.0/oidvc/vci/offers/${id}`;
+            return fetchOfferImage(res, token, imageUrl);
         }
 
         try {
             const token = await getOrRefreshHrToken();
             const offerUrl = `${diagencyAccountUrl}/v1.0/oidvc/vci/offers/${id}`;
-            const offerRes = await fetch(offerUrl, {
-                headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' }
+            const offerRes = await reliableFetch(offerUrl, {
+                headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' },
+            }, {
+                timeout: 30000,
+                onRetry: (attempt, error) => {
+                    console.log(`[HR-DIAGENCY] Retrying offer state check, attempt ${attempt}. Error: ${error.message}`);
+                },
             });
 
             if (offerRes.status === 404) {
                 // Offer no longer exists — confirm issuance via the credentials endpoint.
                 console.log(`[HR-DIAGENCY] Offer ${sanitizeForLog(id)} returned 404 — checking credentials endpoint`);
                 const credUrl = `${diagencyAccountUrl}/v1.0/diagency/credentials?filter=${encodeURIComponent(JSON.stringify({ oid4vci_offer_id: id }))}`;
-                const credRes = await fetch(credUrl, {
-                    headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' }
+                const credRes = await reliableFetch(credUrl, {
+                    headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' },
+                }, {
+                    timeout: 30000,
+                    onRetry: (attempt, error) => {
+                        console.log(`[HR-DIAGENCY] Retrying credentials lookup, attempt ${attempt}. Error: ${error.message}`);
+                    },
                 });
 
                 if (!credRes.ok) {

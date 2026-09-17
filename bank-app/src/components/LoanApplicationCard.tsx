@@ -79,7 +79,7 @@ const LoanApplicationCard: React.FC = () => {
   };
 
   const setEmploymentDataFromVerificationResponse = useCallback(async () => {
-    const data = await diagencyApiService.unauthenticatedRequest('/credentials/verifiable/presentation/vc?purpose=employment', {
+    const data = await diagencyApiService.unauthenticatedRequest('/credentials/verifiable/presentation/employment/vc', {
       method: 'GET',
       headers: { 'Content-Type': 'application/json' },
     });
@@ -104,7 +104,7 @@ const LoanApplicationCard: React.FC = () => {
 
     const poll = async () => {
       try {
-        const data = await diagencyApiService.unauthenticatedRequest('/credentials/verifiable/presentation?purpose=employment', {
+        const data = await diagencyApiService.unauthenticatedRequest('/credentials/verifiable/presentation/employment', {
           method: 'GET',
           headers: { 'Content-Type': 'application/json' },
         });
@@ -161,13 +161,10 @@ const LoanApplicationCard: React.FC = () => {
     setApplicationSubmitted(false);
 
     try {
-      const data = await diagencyApiService.unauthenticatedRequest('/credentials/verifiable/presentation', {
+      // No body parameters — the server determines the exchange type from the URL path.
+      const data = await diagencyApiService.unauthenticatedRequest('/credentials/verifiable/presentation/employment', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: {
-          purpose: 'employment',
-          with_qr_code: true,
-        },
       });
 
       const exchangeId = data.id;

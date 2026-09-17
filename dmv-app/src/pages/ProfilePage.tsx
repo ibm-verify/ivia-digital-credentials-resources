@@ -24,8 +24,6 @@ import { View } from '@carbon/icons-react';
 import { LicenseDetails } from '../components/LicenseDetails';
 import { Copy } from '@carbon/icons-react';
 import vciCredentialService from '../services/VciCredentialService';
-import { useAuth } from '../components/AuthProvider';
-import { UserProfile } from '@carbon/icons-react';
 import PasskeyRegistration from '../components/PasskeyRegistration';
 import PasskeyList from '../components/PasskeyList';
 
@@ -74,7 +72,6 @@ interface UserProfile {
 
 const ProfilePage: React.FC = () => {
   const theme = useTheme();
-  const { user } = useAuth();
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isOfferDialogOpen, setIsOfferDialogOpen] = useState<boolean>(false);
@@ -82,79 +79,23 @@ const ProfilePage: React.FC = () => {
   const [dialogData, setDialogData] = useState<ReactNode | Blob | null>(null);
   const [isPageLoading, setIsPageLoading] = useState<boolean>(true);
   const [passkeyRefreshTrigger, setPasskeyRefreshTrigger] = useState(0);
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
 
-  const today: Date = new Date();
-  const dateOneYearFromToday: Date = new Date(today);
-  dateOneYearFromToday.setFullYear(dateOneYearFromToday.getFullYear() + 1);
-  
-  // Create a user profile from the auth user or use mock data
-  const [userProfile, setUserProfile] = useState<UserProfile>({
-    id: 'user123',
-    firstName: 'John',
-    lastName: 'Doe',
-    email: 'john.doe@example.com',
-    licenseNumber: 'DL-987654321',
-    licenseClass: 'C',
-    issueDate: today.toJSON().slice(0, 10),
-    expiryDate: dateOneYearFromToday.toJSON().slice(0, 10),
-    address: '123 High Street, Southport, QLD 4217, Australia',
-    dateOfBirth: '1990-01-15',
-    birthPlace: 'VIC, Australia',
-    sex: 'Male (1)',
-    height: 180,
-    weight: 75,
-    eyeColour: 'Hazel',
-    hairColour: 'Brown',
-    ageInYears: 35,
-    birthYear: 1990,
-    nationality: 'AU',
-    ageOver18: true,
-    ageOver21: true,
-    ageOver65: false,
-    residentAddress: '123 High Street, Southport, QLD 4217, Australia',
-    residentCity: 'Gold Coast',
-    residentState: 'QLD',
-    residentPostalCode: '4217',
-    residentCountry: 'AU',
-    administrativeNumber: 'ADM-12345',
-    issuingCountry: 'AU',
-    unDistinguishingSign: 'AU',
-    issuingAuthority: 'Department of Motor Vehicles',
-    issuingJurisdiction: 'Main Roads Australia',
-    drivingPrivileges: [
-      { vehicle_category_code: 'C', issue_date: today.toJSON().slice(0, 10), expiry_date: dateOneYearFromToday.toJSON().slice(0, 10) },
-      { vehicle_category_code: 'RE', issue_date: today.toJSON().slice(0, 10), expiry_date: dateOneYearFromToday.toJSON().slice(0, 10) }
-    ]
-  });
-
-  // Update user profile when auth user changes
-  useEffect(() => {
-    if (user) {
-      // Extract profile data from the auth user
-      // This assumes the user object has a profile or similar property
-      // Adjust according to your actual user object structure
-      setUserProfile(prevProfile => ({
-        ...prevProfile,
-        id: user.profile?.sub || prevProfile.id,
-        firstName: user.profile?.given_name || prevProfile.firstName,
-        lastName: user.profile?.family_name || prevProfile.lastName,
-        email: user.profile?.email || prevProfile.email,
-        // Keep other fields from the mock data if not available in the auth user
-      }));
-    }
-  }, [user]);
-
-  // Initialize the VciCredentialService when the component mounts
+  // Initialize the VciCredentialService and fetch the server-authoritative profile
   useEffect(() => {
     const initializeService = async () => {
       try {
         setIsPageLoading(true);
         await vciCredentialService.initialize();
-        // Add a small delay to ensure all data is loaded
-        setTimeout(() => {
-          setIsPageLoading(false);
-        }, 1000);
+        const response = await fetch('/auth/profile', { credentials: 'include' });
+        if (!response.ok) {
+          throw new Error(`Failed to fetch profile: ${response.status}`);
+        }
+        const data = await response.json();
+        setUserProfile(data);
       } catch (error) {
+        console.error('Failed to initialise profile page:', error);
+      } finally {
         setIsPageLoading(false);
       }
     };
@@ -174,6 +115,7 @@ const ProfilePage: React.FC = () => {
   }
 
   const viewLicenseDetails = () => {
+    if (!userProfile) return;
     setIsDialogOpen(true);
     setDialogTitle('Additional information')
     setDialogData(<LicenseDetails userProfile={userProfile} />)
@@ -200,6 +142,10 @@ const ProfilePage: React.FC = () => {
         </Typography>
       </Box>
     );
+  }
+
+  if (!userProfile) {
+    return null;
   }
 
   return (
@@ -525,7 +471,6 @@ const ProfilePage: React.FC = () => {
         isOpen={isOfferDialogOpen}
         handleClose={() => setIsOfferDialogOpen(false)}
         triggerCreate={true}
-        userProfile={userProfile}
       />
     </>
   );

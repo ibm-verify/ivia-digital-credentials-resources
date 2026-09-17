@@ -4,7 +4,6 @@
  * credential schemas and definitions required by the DMV app.
  */
 import diagencyApiService from './DiagencyApiService';
-import defaultProfileImage from '../images/default-profile-male.jpeg';
 import { reliableFetch } from '../reliableFetch';
 
 class VciCredentialService {
@@ -63,55 +62,20 @@ class VciCredentialService {
   }
 
   /**
-   * Create a credential offer for the digital wallet
-   * @param userProfile The user profile data to include in the credential (contains license details)
+   * Create a credential offer for the digital wallet.
+   * All credential data is assembled server-side; this call is a trigger only.
    * @returns A promise that resolves to the credential offer response containing id and credentialOfferPayload
    */
-  async createCredentialOffer(userProfile: any): Promise<any> {
-    try {
-      // Get the credential definition ID
-      const credentialDefinitionId = this.getCredentialDefinitionId();
-      if (!credentialDefinitionId) {
-        throw new Error('Credential definition ID not found');
-      }
-
-      const issuingCountry = userProfile.issuingCountry || 'AU';
-
-      // Prepare the payload
-      const payload = {
-        credential_configuration_ids: [credentialDefinitionId],
-        credential_data: {
-          "org.iso.18013.5.1:document_number": userProfile.licenseNumber,
-          "org.iso.18013.5.1:issue_date": userProfile.issueDate,
-          "org.iso.18013.5.1:expiry_date": userProfile.expiryDate,
-          "org.iso.18013.5.1:given_name": userProfile.firstName,
-          "org.iso.18013.5.1:family_name": userProfile.lastName,
-          "org.iso.18013.5.1:birth_date": userProfile.dateOfBirth,
-          "org.iso.18013.5.1:issuing_country": issuingCountry,
-          "org.iso.18013.5.1:issuing_authority": userProfile.issuingAuthority,
-          "org.iso.18013.5.1:portrait": "/9j/4AAQSkZJRgABAQEAYABgAAD/4QBmRXhpZgAASUkqAAgAAAAEABoBBQABAAAAPgAAABsBBQABAAAARgAAACgBAwABAAAAAgAAADEBAgAQAAAATgAAAAAAAABgAAAAAQAAAGAAAAABAAAAUGFpbnQuTkVUIHYzLjMwAP/bAEMAAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAf/bAEMBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAf/AABEIAAEAAQMBIgACEQEDEQH/xAAfAAABBQEBAQEBAQAAAAAAAAAAAQIDBAUGBwgJCgv/xAC1EAACAQMDAgQDBQUEBAAAAX0BAgMABBEFEiExQQYTUWEHInEUMoGRoQgjQrHBFVLR8CQzYnKCCQoWFxgZGiUmJygpKjQ1Njc4OTpDREVGR0hJSlNUVVZXWFlaY2RlZmdoaWpzdHV2d3h5eoOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4eLj5OXm5+jp6vHy8/T19vf4+fr/xAAfAQADAQEBAQEBAQEBAAAAAAAAAQIDBAUGBwgJCgv/xAC1EQACAQIEBAMEBwUEBAABAncAAQIDEQQFITEGEkFRB2FxEyIygQgUQpGhscEJIzNS8BVictEKFiQ04SXxFxgZGiYnKCkqNTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqCg4SFhoeIiYqSk5SVlpeYmZqio6Slpqeoqaqys7S1tre4ubrCw8TFxsfIycrS09TV1tfY2dri4+Tl5ufo6ery8/T19vf4+fr/2gAMAwEAAhEDEQA/ACiiigD/2Q==",
-          "org.iso.18013.5.1:driving_privileges": userProfile.drivingPrivileges,
-          "org.iso.18013.5.1:un_distinguishing_sign": issuingCountry,
-          "org.iso.18013.5.1:resident_address": userProfile.residentAddress,
-          "org.iso.18013.5.1:resident_city": userProfile.residentCity,
-          "org.iso.18013.5.1:resident_state": userProfile.residentState,
-          "org.iso.18013.5.1:resident_postal_code": userProfile.residentPostalCode,
-          "org.iso.18013.5.1:resident_country": "AU"
-        }
-      };
-
-      // Make the API call using the diagencyApiService through the proxy
-      return await diagencyApiService.authenticatedRequest('/credentials/offers', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        },
-        body: JSON.stringify(payload)
-      });
-    } catch (error) {
-      throw error;
-    }
+  async createCredentialOffer(): Promise<any> {
+    // The server builds the credential_data from session data — send an empty trigger.
+    return await diagencyApiService.authenticatedRequest('/credentials/offers', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      },
+      body: JSON.stringify({})
+    });
   }
 
   /**
@@ -137,14 +101,13 @@ class VciCredentialService {
   }
 
   /**
-   * Create a credential offer and fetch its QR code image
-   * @param userProfile The user profile data to include in the credential (contains license details)
+   * Create a credential offer and fetch its QR code image.
    * @returns A promise that resolves to an object containing the offer ID, image blob, and wallet engagement URL
    */
-  async createOfferAndFetchImage(userProfile: any): Promise<{ id: string, imageBlob: Blob, walletEngagement: string }> {
+  async createOfferAndFetchImage(): Promise<{ id: string, imageBlob: Blob, walletEngagement: string }> {
     try {
       // Create the offer — the server stores the ID in the session.
-      const offerResponse = await this.createCredentialOffer(userProfile);
+      const offerResponse = await this.createCredentialOffer();
       
       if (!offerResponse || !offerResponse.id) {
         throw new Error('Invalid response from create offer API');

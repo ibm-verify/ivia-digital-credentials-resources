@@ -667,9 +667,9 @@ def create_oid4vp_exchange_template(agency_url, access_token):
         "name": "Identity Verification",
         "description": "Request for identity verification using mobile drivers license",
         "exchange_template": {
-            "client_id_prefix": "redirect_uri",
-            "request_mode": "by_value_params",
-            "exchange_completed_redirect_uri": "uri://completed.redirect",
+            "client_id_prefix": "x509_hash",
+            "request_mode": "by_reference_jwt",
+            "response_mode": "direct_post.jwt",
             "dcql_query": {
                 "credentials": [
                     {
@@ -744,9 +744,9 @@ def create_hr_oid4vp_exchange_template(agency_url, access_token):
         "name": "HR Employment Verification",
         "description": "Request first name, surname and salary from proof of employment credential",
         "exchange_template": {
-            "client_id_prefix": "redirect_uri",
-            "request_mode": "by_value_params",
-            "exchange_completed_redirect_uri": "uri://completed.redirect",
+            "client_id_prefix": "x509_hash",
+            "request_mode": "by_reference_jwt",
+            "response_mode": "direct_post.jwt",
             "dcql_query": {
                 "credentials": [
                     {
